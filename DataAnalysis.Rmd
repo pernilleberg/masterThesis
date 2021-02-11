@@ -1,0 +1,318 @@
+---
+title: "Data Analysis Master Thesis 2021"
+author: "Pernille Berg Lassen"
+date: "5/2/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+Steps: 
+
+1 Preliminary data exploration:
+
+1.a Qualitity checks of the eye-tracking data
+  How? Averaged across all participants? How to avoid a center-bias? (All data will be    clustered acround the center)
+  
+1.b Behavioral data
+  Demographics: Age (mean, range, SD)
+  General art-interest (between groups and across entire participant pool)
+  Familiarity - how familiar were the artworks to the participants? Confounding?
+  
+  
+2 Vizualitions (Both behavioral and eye-tracking data)
+  Behavioral: Bar plots
+  ET: Heat maps and scan paths
+  
+Scaling the ET data (viewing times are varied)
+
+
+3 Defining AOI's/ROI's/Clusters
+  Define AOI based on saliency maps (purely bottom-up) 
+  Define clusters from the fixation data (See Massaro et al., 2012)
+  Define AOI
+  
+4 Models
+  4.a Behavioral data: (g)lmer
+     Does condiiton predict ratings (understanding and appreciaiton)?
+     Does rating predict artist/art-genre?
+       Any artist/art-genre that recieved hihger/lower ratings?
+     Does art interest predict ratings? A trend across artist/art-genre?
+     Does familiarity (if relevant - depends on the overall familiarity level)?
+     
+  Check correlation between the questions - collapse or nah?
+  
+  4.b ET: glmer
+    NB: a sequential dimensions - first five fixations (more bottom-up) vs. the rest        (more top-down)
+    Does duration of fixation + number of fixations predict condition? (Or the other way     around)?
+    Does time spent in AOI predict condition? (or the other way around)?
+    Does time to first fixation in AOI's predict condition? (or the other way around)?
+    Does total viewing time (scaled) predict condition/artist/art-genre? 
+    
+5 Saliency algoritm
+  ET: looking at the effect of saliency
+  NB: The whole dataset (averaged across participants) vs. fixations only in   clusters   (so AOI defined from the fixations)?)
+  
+  First five fixations vs. the rest of the fixations. 
+  
+  ROC and AUC - accuracy
+  NB: how to interpret the results? Comparing to the binary saliency maps? (see Koide,    2015).
+  
+6 Model evaluation
+  Cross-validation of models - investigate predictive power as well as explanatory
+
+###Loading packages
+```{r}
+library(pacman)
+p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan)
+library(edfReader)
+library(eyetrackingR)
+```
+
+
+```{r}
+#Load data
+BehaveDat = read.csv("DataBsC/BehavioralData_New.csv") #<-- using data from the Bachelor to test code
+BehaveDat = subset(BehaveDat, select = -c(X))
+
+SacDat = read.csv("DataBsc/SaccadesData_New.csv",header = T)
+SacDat = subset(SacDat, select = -c(X))
+SacDat = subset(SacDat, select = -c(Number_sac))
+SacDat = subset(SacDat,SacDat$Duration < 80) #Removing artifacts
+
+FixDat = read.csv("DataBsC/FixationsData_New.csv", header = T)
+FixDat = subset(FixDat, select = -c(X))
+FixDat = subset(FixDat, select = -c(Number_fix))
+FixDat = subset(FixDat,FixDat$Duration > 200) #Removing artifacts
+
+count = group_by(FixDat,image,ID) %>% summarize(Number_fix=n())
+countSac = group_by(SacDat,image,ID) %>% summarize(Number_sac=n())
+Fix_df = plyr::join(FixDat,count)
+Sac_df = plyr::join(SacDat,countSac)
+Fix_df$PositionY = round((901-Fix_df$PositionY),2) #Data was flipped
+
+#remove(FixDat)
+#remove(SacDat)
+#remove(count)
+#remove(countSac)
+```
+
+Vizualizations
+
+```{r}
+#Demographics
+
+Dat_grouped = group_by(BehaveDat,ID,gender,condition,age) %>% summarize()
+
+sum(Dat_grouped$gender == 'Female' & Dat_grouped$condition == 1) 
+sum(Dat_grouped$gender == 'Female' & Dat_grouped$condition == 0) 
+sum(Dat_grouped$gender == 'Male' & Dat_grouped$condition == 1) 
+sum(Dat_grouped$gender == 'Male' & Dat_grouped$condition == 0)
+round(mean(Dat_grouped$age),2)
+round(sd(Dat_grouped$age),2)
+round(mean(Dat_grouped$age[Dat_grouped$condition == 1]),2)
+round(sd(Dat_grouped$age[Dat_grouped$condition == 1]),2)
+round(mean(Dat_grouped$age[Dat_grouped$condition == 0]),2)
+round(sd(Dat_grouped$age[Dat_grouped$condition == 0]),2)
+
+#Image familarity 
+
+Image_grouped = group_by(BehaveDat, ID, image, q7, artist, genre) %>% summarize()
+img_fam = subset(Image_grouped,Image_grouped$q7 == 'yes')
+img_fam = group_by(img_fam,image, artist, genre)  %>% summarize(Number_yes=n())
+img_fam$Number_yes = sort(img_fam$Number_yes, decreasing = T)
+
+summary(img_fam$artist) 
+summary(img_fam$genre)
+
+sum(img_fam$Number_yes[img_fam$artist == 'chagall']) #change with relevant artist names
+sum(img_fam$Number_yes[img_fam$artist == 'schiele'])
+sum(img_fam$Number_yes[img_fam$artist == 'rothko'])
+sum(img_fam$Number_yes[img_fam$artist == 'pollock'])
+
+sum(img_fam$Number_yes[img_fam$genre == 'fig'])
+sum(img_fam$Number_yes[img_fam$genre == 'abstract'])
+
+
+#Art interest
+art_interest <- BehaveDat %>% #summarizing results from art interest questionaire
+  group_by(ID) %>%
+  summarize(
+    q8 = q8[1],
+    q9 = q9[1],
+    q10 = q10[1],
+    q11 = q11[1],
+    condition = condition[1]
+  )
+
+#How many participants have taken art-classes?
+
+length(art_interest$ID[art_interest$q11 == "yes" & art_interest$condition == 1])
+length(art_interest$ID[art_interest$q11 == "yes" & art_interest$condition == 0])
+
+art_interest$condition = as.factor(art_interest$condition)
+
+art_interest$condition = plyr::revalue(art_interest$condition, c("1"= "Experts", "0"= "Non-Experts"))
+
+all_part <- ggplot(art_interest, aes(x = q8)) +
+  geom_bar(fill = "#99CCFF") +
+  xlab("Ratings: Question X") +
+  ylab("Participant counts") +
+  theme_minimal()
+  #How to change the values on the y-axis?
+
+#Bar plots
+bar_plot <- ggplot(art_interest, aes(x = q8)) + 
+  geom_bar(fill = "#99CCFF") + 
+  facet_wrap(~condition) + 
+  xlab("Ratings: Question X") + 
+  ylab("Partcipant counts") + 
+  theme_minimal()
+
+box_plot <- ggplot(art_interest,aes(y=q9,x=condition)) +
+  geom_boxplot(color = "#336699", fill = "#6699CC") +
+  xlab("Condition") +
+  ylab("Rating") +
+  ggtitle("Question X") + 
+  coord_cartesian(ylim = c(1, 7)) +
+  theme_minimal()
+
+#Leaving an axis label blank: theme(axis.title.y = element_blank())
+
+ggarrange(all_part,bar_plot) #what plots to display next to one another?
+
+```
+
+Testing art-interest
+
+```{r}
+#Mean and SD
+art_interest %>%
+  group_by(condition) %>%
+  summarize(
+    mean_q8 = round(mean(q8),2),
+    sd_q8 = round(sd(q8),2),
+    mean_q9 = round(mean(q9),2),
+    sd_q9 = round(sd(q9),2),
+    mean_q10 = round(mean(q10),2),
+    sd_q10 = round(sd(q10),2)
+  )
+
+#testing assumptions - what to test?
+
+model <- glm(condition ~ q8, family = 'binomial', art_interest) #one model per question or one model with all questions?
+summary(model)
+
+
+```
+
+Scanpaths and heatmaps
+
+```{r}
+#Acessing quality of ET data?
+#Subsetting dataframe to make heatmaps for 4 chosen images
+
+img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_fig11.png')
+g <- grid::rasterGrob(img, interpolate = T)
+
+jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
+
+#Participant 1
+heatmap_P1 <- ggplot(subset(Fix_df, ID==1 & image=='images_rothko\\abstract_6.png'),aes(x = PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0, 900) +
+  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) +
+scale_alpha(range = c(0.1, 0.6)) + scale_fill_gradientn(colours = jet.colors(10), trans='sqrt')
+
+#Participant 2
+heatmap_P2 <- ggplot(subset(Fix_df, ID==2 & image=='images_rothko\\abstract_6.png'),aes(x = PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0, 900) +
+  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) +
+scale_alpha(range = c(0.1, 0.6)) + scale_fill_gradientn(colours = jet.colors(10), trans='sqrt')
+
+#All participants
+heatmap <- ggplot(subset(Fix_df, image=='images_schiele\\fig_11.png'),aes(x = PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0, 900) +
+  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) +
+scale_alpha(range = c(0.1, 0.6)) + scale_fill_gradientn(colours = jet.colors(10), trans='sqrt')
+
+averaged_heatmaps <- Fix_df %>%
+  group_by(image) %>%
+  mutate(Counter = sequence(rle(ID)$lengths)) %>%
+  ungroup() %>%
+  group_by(image, Counter) %>%
+  summarize(
+    PositionX = median(PositionX),
+    PositionY = median(PositionY)
+  )
+
+aveHM <-
+  ggplot(subset(averaged_heatmaps,image == "images_schiele\\fig_11.png"),aes(x =1601-PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0,900) +
+  annotation_custom(g,xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) + scale_alpha(range = c(0.1, 0.6)) +
+  scale_fill_gradientn(colours = jet.colors(10), trans='sqrt') + ggtitle("All Participants")
+
+test <- subset(averaged_heatmaps, select = c(PositionX,PositionY))
+test <- as.matrix(test)
+kNNdistplot(test,k=4) + abline(h = .5, col = "red", lty = 2)
+db <- dbscan(test, eps = 50)
+
+# load background image filtering out filetype string data
+bkg_img <- png::readPNG("DataBsC/heatmaps_scanpaths_images/screenshot_fig11.png")
+pairs(test, col = res$cluster + 1L)
+print(plot(test, col = res$cluster + 1L))  #res$cluster, main = title_str))
+limits <- par()
+rasterImage(bkg_img, limits$usr[1], limits$usr[3], limits$usr[2], limits$usr[4])
+print(grid())
+print(plot(test, col = "blue"))
+
+print(plot(test, col = "blue"))
+rasterImage(bkg_img,db$cluster)
+print(grid())
+
+
+```
+
+PLaying around with et packages
+
+```{r}
+
+make_eyetrackingr_data()
+
+runDBSCAN <- function(condition, data, stimuli_name = "DataBsC/heatmaps_scanpaths_images/screenshot_fig11.png")
+{
+    bkg_img <- readPNG(paste0(stimuli_name))
+
+    # run DBSCAN and output results
+    matrix_data <- as.matrix(na.omit(data))
+    db <- dbscan(matrix_data, eps = args[["eps"]], minPts = args[["minPts"]])
+    cat("\n", title_str, "\n")
+    print(db)
+
+    # output plots and add bkg image to them
+    print(pairs(matrix_data, col = db$cluster + 1L))
+    print(plot(matrix_data, col = db$cluster + 1L, main = title_str))  #res$cluster, main = title_str))
+    limits <- par()
+    rasterImage(bkg_img, limits$usr[1], limits$usr[3], limits$usr[2], limits$usr[4])
+    print(grid())
+    
+    # print raw fixation plot
+    print(plot(matrix_data, col = "blue", main = title_str))
+    rasterImage(bkg_img, limits$usr[1], limits$usr[3], limits$usr[2], limits$usr[4])
+    print(grid())
+}
+
+#matrix_data <- as.matrix(na.omit(data))
+print(kNNdistplot(test)) + abline(h = 25, col = "red", lty = 2)
+cl <-  dbscan(iris, eps = .5, minPts = 4)
+pairs(iris, col = cl$cluster+1L)
+
+db <- dbscan(test, eps = 30)
+
+```

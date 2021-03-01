@@ -28,8 +28,8 @@ Scaling the ET data (viewing times are varied)
 
 3 Defining AOI's/ROI's/Clusters
   Define AOI based on saliency maps (purely bottom-up) 
-  Define clusters from the fixation data (See Massaro et al., 2012)
-  Define AOI
+  Define clusters from the fixation data - dbscan (Davies et al.)
+  Evt. define AOI based on Arnheim
   
 4 Models
   4.a Behavioral data: (g)lmer
@@ -59,13 +59,14 @@ Scaling the ET data (viewing times are varied)
   
 6 Model evaluation
   Cross-validation of models - investigate predictive power as well as explanatory
+  
+Transition behavior between clusters?
 
 ###Loading packages
 ```{r}
 library(pacman)
 p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan)
-library(edfReader)
-library(eyetrackingR)
+#library(edfReader)
 ```
 
 
@@ -217,7 +218,7 @@ g <- grid::rasterGrob(img, interpolate = T)
 jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
 
 #Participant 1
-heatmap_P1 <- ggplot(subset(Fix_df, ID==1 & image=='images_rothko\\abstract_6.png'),aes(x = PositionX, y = PositionY)) +
+heatmap_P1 <- ggplot(subset(Fix_df, ID==1 & image=='images_schiele\\fig_11.png'),aes(x = PositionX, y = PositionY)) +
   xlim(0,1600) +
   ylim(0, 900) +
   annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
@@ -258,6 +259,19 @@ aveHM <-
   stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) + scale_alpha(range = c(0.1, 0.6)) +
   scale_fill_gradientn(colours = jet.colors(10), trans='sqrt') + ggtitle("All Participants")
 
+#Remove fixations that is not on the stimulus
+
+```
+
+```{r}
+#Testing dbscan
+
+#Testing on data from Davies et al.
+mag_data <- read.csv("Gallery-study-1.0.0/MAG/data/condition1.csv")
+mag_data <- mag_data[mag_data$GazeEventType == "Fixation", ] #Only fixations
+participants <- as.vector(mag_data[!duplicated(mag_data$ParticipantName), 1])
+#Get data for one specific stimulus only: mag_data[mag_data$MediaName == stimuli_name, ]
+
 test <- subset(averaged_heatmaps, select = c(PositionX,PositionY))
 test <- as.matrix(test)
 kNNdistplot(test,k=4) + abline(h = .5, col = "red", lty = 2)
@@ -282,8 +296,6 @@ print(grid())
 PLaying around with et packages
 
 ```{r}
-
-make_eyetrackingr_data()
 
 runDBSCAN <- function(condition, data, stimuli_name = "DataBsC/heatmaps_scanpaths_images/screenshot_fig11.png")
 {
@@ -314,5 +326,55 @@ cl <-  dbscan(iris, eps = .5, minPts = 4)
 pairs(iris, col = cl$cluster+1L)
 
 db <- dbscan(test, eps = 30)
+
+```
+
+```{r}
+#Playing around with sparseness
+
+#Prepping a dataframe
+sparseness_df <- data.frame(ID = numeric(),
+                            L1 = numeric(),
+                            L2 = numeric(),
+                            median_sal = numeric(),
+                            mean_sal = numeric(),
+                            sparseness = numeric())
+
+
+temp = list.files(path = "salmaps/", pattern="*.csv", full.names = T)
+myfiles = lapply(temp,read.delim,sep=",",header = F)
+
+N = 1440000 #number of pixels
+
+#Equation for calculating sparseness is adapted from Koide et al. (2015)
+
+ID = 1
+for (map in myfiles){
+  L1 <- sum(map)
+  L2 <- sqrt(sum(map^2))
+  median_sal_val <- median(as.matrix(map))
+  mean_sal_val <- mean(as.matrix(map))
+  sparseness_val <- (1/(sqrt(N)-1))*(sqrt(N)-(L1/L2))
+  sparseness_df[nrow(sparseness_df) + 1,] = c(ID = ID, L1 = L1, L2 = L2, median_sal = median_sal_val, mean_sal = mean_sal_val, sparseness = sparseness_val)
+  ID = ID + 1
+}
+
+sparseness_df$artist <- c(rep("Chagall", 5), rep("Pollock", 5),
+                                  rep("Rothko", 5), rep("Schiele", 5))
+
+#cols.num <- c("L1","L2","median_sal","mean_sal","sparseness") - if non-numeric
+#sparseness_df[cols.num] <- sapply(sparseness_df[cols.num],as.numeric)
+#Checking classes of variables: sapply(sparseness_df, class)
+
+#sparseness_df %>% mutate_at(vars(L1, L2,median_sal,mean_sal,sparseness), funs(round(., 2)))
+
+few_peak <- subset(sparseness_df,sparseness_df$sparseness >= 0.3981822)
+many_peak <- subset(sparseness_df,sparseness_df$sparseness < 0.3981822)
+
+mean(sparseness_df$mean_sal)
+
+#Which value to properly display the many_peak/few_peak?
+
+#write.csv(sparseness_df, 'sparseness_test.csv')
 
 ```

@@ -6,6 +6,14 @@ output: html_document
 editor_options: 
   chunk_output_type: console
 ---
+The analysis consits of:
+1. Data cleaning
+2. Sparseness calculation
+3. Preparing data to analysis in Matlab (rocScore calulation from gbvs)
+4. Analysis on Matlab data (outcome of gbvs)
+5.
+
+
 Steps: 
 
 1 Preliminary data exploration:
@@ -66,8 +74,8 @@ Transition behavior between clusters?
 ###Loading packages
 ```{r}
 library(pacman)
-p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,gtools)
-library(factoextra)
+p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,gtools, factoextra)
+library(ggimage)
 #library(edfReader)
 ```
 
@@ -91,50 +99,40 @@ count = group_by(FixDat,image,ID) %>% summarize(Number_fix=n())
 countSac = group_by(SacDat,image,ID) %>% summarize(Number_sac=n())
 Fix_df = plyr::join(FixDat,count)
 Sac_df = plyr::join(SacDat,countSac)
-Fix_df$PositionY = round((901-Fix_df$PositionY),2) #Data was flipped
+Fix_df$PositionY = round((901-Fix_df$PositionY),2) #Data was flipped - make sure to check if this is also the case for new data
+
+#Renaming images - change accordingly depending on stimulus names
+Fix_df$image = str_replace_all(Fix_df$image,"images_",'')
+Fix_df$image = str_replace_all(Fix_df$image,"\\\\",'')
+Fix_df$image = str_replace_all(Fix_df$image,"rothko",'')
+Fix_df$image = str_replace_all(Fix_df$image,"pollock",'')
+Fix_df$image = str_replace_all(Fix_df$image,"schiele",'')
+Fix_df$image = str_replace_all(Fix_df$image,"chagall",'')
+Fix_df$image = str_replace_all(Fix_df$image,".png",'')
 
 #remove(FixDat)
 #remove(SacDat)
 #remove(count)
 #remove(countSac)
 
-#Including only five first fixations on each image
-Fix_df_small <-
+#First 10 fixations on each image
+Fix_df_10Fix <-
 Fix_df %>% 
   group_by(ID,image) %>% 
-  filter(row_number()==1:5)
-
-#Including only first five seconds
-temp_df <- subset(Fix_df, select = c(ID, image, sttime, entime))
-
-temp_df <- temp_df %>%
-  group_by(image,ID) %>% 
-  summarise(trial_stattime = sttime[1])
-
-temp_df <- merge(Fix_df,temp_df)
-
-temp_df$time_passed <- temp_df$entime - temp_df$trial_stattime
-temp_df$time_passed <- temp_df$time_passed/1000 #In seconds
-
-Fix_df_fiveS <- subset(temp_df, temp_df$time_passed <= 5)
-
-Fix_df_fiveS$image = str_replace_all(Fix_df_fiveS$image,"images_",'')
-Fix_df_fiveS$image = str_replace_all(Fix_df_fiveS$image,"\\\\fig",'')
-Fix_df_fiveS$image = str_replace_all(Fix_df_fiveS$image,"\\\\abstract",'')
-Fix_df_fiveS$image = str_replace_all(Fix_df_fiveS$image,".png",'')
-Fix_df_fiveS$image = str_replace_all(Fix_df_fiveS$image, 'pollock_1', 'pollock_')
-Fix_df_fiveS$image = str_replace_all(Fix_df_fiveS$image, 'pollock_20','pollock_10')
-Fix_df_fiveS$image = str_replace_all(Fix_df_fiveS$image, 'schiele_1', 'schiele_')
-Fix_df_fiveS$image = str_replace_all(Fix_df_fiveS$image, 'schiele_20','schiele_10')
-
+  filter(row_number()==1:10)
 
 #Recap:
 #Fix_df = full dataset
-#Fix_df_fiveS = first five seconds only
-#Fix_df_small = first five fixations only
+#Fix_df_10Fix = first 10 fixations on each image for each participants
+
+#merge with results from sparseness analysis:
+sparsenessResults <- read.csv('SparsenessResults.csv')
+sparsenessResults <- subset(sparsenessResults, select = -c(X))
+Fix_df_10Fix <- merge(Fix_df_10Fix,sparsenessResults)
+Fix_df_10Fix <- Fix_df_10Fix[order(Fix_df_10Fix[,2], Fix_df_10Fix[,18]),]
 ```
 
-Vizualizations
+Vizualizations and preliminary data-exploration
 
 ```{r}
 #Demographics
@@ -305,12 +303,67 @@ Cluster definition using DBSCAN
 ```{r}
 #Testing dbscan
 
-test <- subset(averaged_heatmaps, averaged_heatmaps$image == 'images_pollock\\abstract_17.png') #average fixations for one image
+#Dbscan should be on full data set?
 
-test <- subset(test, select = c(PositionX,PositionY)) #selecting fixations position only
-test <- as.matrix(test) #dbscan works with matrices
-kNNdistplot(test,k=4) + abline(h = 60, col = "red", lty = 2) #use knn distance plot to determine optimal eps value - look for where the data changes significantly (from linear to exponential)
-db <- dbscan(test, eps = 40) #run cluster analysis
+averaged_full_data_C1 <- subset(Fix_df, Fix_df$condition == 1) %>%
+  group_by(image) %>%
+  mutate(Counter = sequence(rle(ID)$lengths)) %>%
+  ungroup() %>%
+  group_by(image, Counter) %>%
+  summarize(
+    PositionX = median(PositionX),
+    PositionY = median(PositionY)
+  )
+
+averaged_full_data_C0 <- subset(Fix_df, Fix_df$condition == 0) %>%
+  group_by(image) %>%
+  mutate(Counter = sequence(rle(ID)$lengths)) %>%
+  ungroup() %>%
+  group_by(image, Counter) %>%
+  summarize(
+    PositionX = median(PositionX),
+    PositionY = median(PositionY)
+  )
+#test <- subset(test, select = c(PositionX,PositionY)) #selecting fixations position only
+#test <- as.matrix(test) #dbscan works with matrices
+#kNNdistplot(test,k=4) + abline(h = 60, col = "red", lty = 2) #use knn distance plot to determine optimal eps value - look for where the data changes significantly (from linear to exponential)
+#db <- dbscan(test, eps = 40) #run cluster analysis
+
+
+#Generate kNN distance plots to determine optimal eps value - look for where the data changes significantly
+for(i in unique(averaged_full_data_C0$image)){
+  data <- subset(averaged_full_data_C0, image == i)
+  data <- subset(data, select = c(PositionX, PositionY))
+  matrix_data <- as.matrix(data)
+  file = i
+  print(kNNdistplot(matrix_data,k=4))
+  #assign(paste("kNN_",file,sep = ""),distplot)
+}
+
+#Run cluster analysis using dbscan and save outcome
+#Need to be done: add the optimal eps value for each image
+for(i in unique(averaged_full_data_C0$image)){
+  data <- subset(averaged_full_data_C0, image == i)
+  data <- subset(data, select = c(PositionX, PositionY))
+  matrix_data <- as.matrix(data)
+  file = i
+  db <- dbscan(matrix_data, eps = 30)
+  assign(paste("db_",file,sep = ""),db)
+}
+
+#list_of_eps_values = (10,10)
+
+subset_data <- as.matrix(subset(averaged_full_data_C0,  averaged_full_data_C0$image == "abstract_1", select = c(PositionX, PositionY)))
+
+db_test <- dbscan(matrix_data,eps = )
+
+plot  <-  fviz_cluster(db_abstract_1, subset_data, stand = FALSE, geom = 'point') +
+  xlim(0,1600) +
+  ylim(0,900)
+
+img = "DataBsC/heatmaps_scanpaths_images/screenshot_fig1.png"
+
+ggbackground(plot,img) #yeah that doesn't work   
 
 bkg_img <- png::readPNG("DataBsC/heatmaps_scanpaths_images/screenshot_fig1.png")
 pairs(test, col = db$cluster + 1L) #clusters seperated by axis
@@ -319,7 +372,7 @@ limits <- par()
 rasterImage(bkg_img, limits$usr[1], limits$usr[3], limits$usr[2], limits$usr[4]) 
 points(test[db$cluster==0,], pch = 3, col = "grey")
 
-img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_abs17.png')
+img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_abs1.png')
 g <- grid::rasterGrob(img, interpolate = T)
 
 test <- as.data.frame(test)
@@ -334,165 +387,5 @@ plot_2 <- ggplot(test, aes(x = PositionX, y = PositionY)) +
 plot  <-  fviz_cluster(db, test, stand = FALSE, geom = "point", main = "Cluster formation in 'Number 8' by Jackson Pollock") +
   xlim(0,1600) +
   ylim(0,900)
-```
-
-Sparseness and saliency maps
-```{r}
-#Playing around with sparseness
-
-#Prepping a dataframe
-sparseness_resized_df <- data.frame(ID = numeric(),
-                            L1 = numeric(),
-                            L2 = numeric(),
-                            median_sal = numeric(),
-                            mean_sal = numeric(),
-                            sparseness = numeric())
-
-
-temp = list.files(path = "salmaps/Resized/", pattern="*.csv", full.names = T)
-new_temp <- mixedsort(temp)
-myfiles = lapply(new_temp,read.delim,sep=",",header = F)
-
-#Resized is the saliency maps fit to the orignal size of the image - large files, takes a little to load
-
-N_resized = 1440000 #number of pixels in resized images/maps
-N = 576 #number of pixels in conspicuity maps and 'actual' saliency maps
-
-#Equation for calculating sparseness is adapted from Koide et al. (2015)
-
-ID = 1
-for (map in myfiles){
-  L1 <- sum(map)
-  L2 <- sqrt(sum(map^2))
-  median_sal_val <- median(as.matrix(map))
-  mean_sal_val <- mean(as.matrix(map))
-  sparseness_val <- (1/(sqrt(N_resized)-1))*(sqrt(N_resized)-(L1/L2))
-  sparseness_resized_df[nrow(sparseness_resized_df) + 1,] = c(ID = ID, L1 = L1, L2 = L2, median_sal = median_sal_val, mean_sal = mean_sal_val, sparseness = sparseness_val)
-  ID = ID + 1
-}
-
-sparseness_resized_df$artist <- c(rep("Chagall", 10), rep("Pollock", 10),
-                                  rep("Rothko", 10), rep("Schiele", 10))
-
-#Conspicuity and 'acutal' maps
-
-temp = list.files(path = "salmaps/Conspicuity maps/", pattern="*_ori.csv", full.names = T)
-new_temp <- mixedsort(temp) #make sure they are sorted before adding ID coloumn/artist
-
-myfiles = lapply(new_temp,read.delim,sep=",",header = F)
-
-sparseness_ori_df <- data.frame(ID = numeric(),
-                            L1 = numeric(),
-                            L2 = numeric(),
-                            median_sal = numeric(),
-                            mean_sal = numeric(),
-                            sparseness = numeric())
-
-ID = 1
-for (map in myfiles){
-  L1 <- sum(map)
-  L2 <- sqrt(sum(map^2))
-  median_sal_val <- median(as.matrix(map))
-  mean_sal_val <- mean(as.matrix(map))
-  sparseness_val <- (1/(sqrt(N)-1))*(sqrt(N)-(L1/L2))
-  sparseness_color_df[nrow(sparseness_color_df) + 1,] = c(ID = ID, L1 = L1, L2 = L2, median_sal = median_sal_val, mean_sal = mean_sal_val, sparseness = sparseness_val)
-  ID = ID + 1
-}
-
-sparseness_ori_df$Image <- c(rep(seq(1:10), 4))
-sparseness_ori_df$Image <- paste(sparseness_ori_df$artist,"_",sparseness_ori_df$Image)
-sparseness_ori_df$Image <- gsub( " ", "", sparseness_ori_df$Image) 
-
-#cols.num <- c("L1","L2","median_sal","mean_sal","sparseness") - if non-numeric
-#sparseness_df[cols.num] <- sapply(sparseness_df[cols.num],as.numeric)
-#Checking classes of variables: sapply(sparseness_df, class)
-
-#sparseness_df %>% mutate_at(vars(L1, L2,median_sal,mean_sal,sparseness), funs(round(., 2)))
-
-median(sparseness_df$sparseness) #0.4297284
-median(sparseness_resized_df$sparseness) #0.4114786
-median(sparseness_color_df$sparseness) #0.4373788
-median(sparseness_int_df$sparseness) #0.4275935
-median(sparseness_ori_df$sparseness) #0.4139771
-
-sparseness_df$Image[sparseness_df$sparseness >= 0.4297284] 
-sparseness_color_df$Image[sparseness_color_df$sparseness >= 0.4373788]
-sparseness_int_df$Image[sparseness_int_df$sparseness >= 0.4275935]
-sparseness_ori_df$Image[sparseness_ori_df$sparseness >= 0.4139771]
-#Some slight differences in classification between maps
-
-few_peak <- subset(sparseness_df,sparseness_df$sparseness >= 0.4297284)
-few_peak$peak_group <- 'few'
-many_peak <- subset(sparseness_df,sparseness_df$sparseness < 0.4297284)
-many_peak$peak_group <- 'many'
-
-peak <- rbind(few_peak,many_peak)
-peak <- subset(peak, select = -c(ID,artist))
-peak$Image = tolower(peak$Image)
-colnames(peak)[6] <- "image"
-
-Fix_df_fiveS <- merge(Fix_df_fiveS,peak)
-
-#Which value to properly display the many_peak/few_peak?
-
-```
-
-
-```{r}
-#Prepping data for matlab
-
-averaged_dataC0 <- subset(Fix_df_fiveS, condition == 0) %>%
-  group_by(image) %>%
-  mutate(Counter = sequence(rle(ID)$lengths)) %>%
-  ungroup() %>%
-  group_by(image, Counter) %>%
-  summarize(
-    PositionX = median(PositionX),
-    PositionY = median(PositionY),
-    Condition = condition[1]
-  )
-
-averaged_dataC1 <- subset(Fix_df_fiveS, condition == 1) %>%
-  group_by(image) %>%
-  mutate(Counter = sequence(rle(ID)$lengths)) %>%
-  ungroup() %>%
-  group_by(image, Counter) %>%
-  summarize(
-    PositionX = median(PositionX),
-    PositionY = median(PositionY),
-    Condition = condition[1]
-  )
-
-testC1 = subset(averaged_dataC1, image == "schiele_1")
-testC0 = subset(averaged_dataC0, image == "schiele_1")
-testC1 = subset(testC1, select = c(PositionX, PositionY))
-testC0 <- subset(testC0, select = c(PositionX, PositionY))
-
-write.csv(testC1,"fig_11_C1_firstF.csv")
-write.csv(testC0,"fig_11_C0_firstF.csv")
-
-Score_fig_1_C1 = 0.899040274445397
-Score_fig_1_C0 = 0.937433046642523
-
-Score_fig_11_C1 = 0.956673044003625
-Score_fig_11_C0 = 0.945405852103653
-
-Score_abs_11_C1 = 0.765185781895076
-Score_abs_11_C0 = 0.787589818020201
-
-Score_abs_4_C1 = 0.943451539762291
-Score_abs_4_C0 = 0.961157295685055
-
-AUC_df_C0 <- data.frame(Genre = c(rep("abs",2),rep("fig",2)), Condition = rep(0, 4), AUC = c(0.961157295685055,0.787589818020201,0.937433046642523,0.945405852103653))
-
-AUC_df_C1 <-  data.frame(Genre = c(rep("abs",2),rep("fig",2)), Condition = rep(1, 4), AUC = c(0.943451539762291, 0.765185781895076, 0.899040274445397, 0.956673044003625))
-
-AUC_df = rbind(AUC_df_C0,AUC_df_C1)
-
-t.test(AUC_df_C0$AUC,AUC_df_C1$AUC)
-
-mean(AUC_df_C0$AUC)
-mean(AUC_df_C1$AUC)
-
 ```
 

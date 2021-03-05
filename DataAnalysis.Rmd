@@ -130,6 +130,9 @@ sparsenessResults <- read.csv('SparsenessResults.csv')
 sparsenessResults <- subset(sparsenessResults, select = -c(X))
 Fix_df_10Fix <- merge(Fix_df_10Fix,sparsenessResults)
 Fix_df_10Fix <- Fix_df_10Fix[order(Fix_df_10Fix[,2], Fix_df_10Fix[,18]),]
+
+#rm(sparsenessResults)
+
 ```
 
 Vizualizations and preliminary data-exploration
@@ -245,38 +248,22 @@ Scanpaths and heatmaps
 
 ```{r}
 #Acessing quality of ET data?
-#Subsetting dataframe to make heatmaps for 4 chosen images
+#Subsetting dataframe to make heatmaps for 4 chosen images - two abs, two fig (one for each artist)
 
 img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_fig11.png')
 g <- grid::rasterGrob(img, interpolate = T)
 
 jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
 
-#Participant 1
-heatmap_P1 <- ggplot(subset(Fix_df, ID==1 & image=='images_schiele\\fig_11.png'),aes(x = PositionX, y = PositionY)) +
+#One participant, one image
+heatmap_P1 <- ggplot(subset(Fix_df, ID==1 & image=='fig_11'),aes(x = PositionX, y = PositionY)) +
   xlim(0,1600) +
   ylim(0, 900) +
   annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
   stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) +
 scale_alpha(range = c(0.1, 0.6)) + scale_fill_gradientn(colours = jet.colors(10), trans='sqrt')
 
-#Participant 2
-heatmap_P2 <- ggplot(subset(Fix_df, ID==2 & image=='images_rothko\\abstract_6.png'),aes(x = PositionX, y = PositionY)) +
-  xlim(0,1600) +
-  ylim(0, 900) +
-  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
-  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) +
-scale_alpha(range = c(0.1, 0.6)) + scale_fill_gradientn(colours = jet.colors(10), trans='sqrt')
-
-#All participants
-heatmap <- ggplot(subset(Fix_df, image=='images_schiele\\fig_11.png'),aes(x = PositionX, y = PositionY)) +
-  xlim(0,1600) +
-  ylim(0, 900) +
-  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
-  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) +
-scale_alpha(range = c(0.1, 0.6)) + scale_fill_gradientn(colours = jet.colors(10), trans='sqrt')
-
-averaged_heatmaps <- Fix_df %>%
+averaged_full_data <- Fix_df %>%
   group_by(image) %>%
   mutate(Counter = sequence(rle(ID)$lengths)) %>%
   ungroup() %>%
@@ -286,13 +273,39 @@ averaged_heatmaps <- Fix_df %>%
     PositionY = median(PositionY)
   )
 
+#Heatmaps
 aveHM <-
-  ggplot(subset(averaged_heatmaps,image == "images_schiele\\fig_11.png"),aes(x =1601-PositionX, y = PositionY)) +
+  ggplot(subset(averaged_full_data,image == "fig_11"),aes(x =PositionX, y = PositionY)) +
   xlim(0,1600) +
   ylim(0,900) +
   annotation_custom(g,xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
   stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) + scale_alpha(range = c(0.1, 0.6)) +
   scale_fill_gradientn(colours = jet.colors(10), trans='sqrt') + ggtitle("All Participants")
+
+#Scanpaths
+aveSP = ggplot(subset(averaged_full_data, image == "fig_11"), aes(x = PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0,900) +
+  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  geom_point(size = 8, alpha = 0.5, color = "white") + 
+  geom_path(size = 1, alpha = 0.3) + 
+  geom_text(aes(label = Counter, size = 5)) +
+  ggtitle("All Participants")
+
+
+#One participant
+test_fix <- Fix_df %>%
+  group_by(image) %>%
+  mutate(Counter = sequence(rle(ID)$lengths))
+
+SP = ggplot(subset(test_fix, image == "fig_11" & ID == 1), aes(x = PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0,900) +
+  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  geom_point(size = 8, alpha = 0.5, color = "white") + 
+  geom_path(size = 1, alpha = 0.3) + 
+  geom_text(aes(label = Counter, size = 5)) +
+  ggtitle("Participant X")
 
 #Remove fixations that is not on the stimulus?
 
@@ -335,9 +348,7 @@ for(i in unique(averaged_full_data_C0$image)){
   data <- subset(averaged_full_data_C0, image == i)
   data <- subset(data, select = c(PositionX, PositionY))
   matrix_data <- as.matrix(data)
-  file = i
   print(kNNdistplot(matrix_data,k=4))
-  #assign(paste("kNN_",file,sep = ""),distplot)
 }
 
 #Run cluster analysis using dbscan and save outcome
@@ -347,17 +358,35 @@ for(i in unique(averaged_full_data_C0$image)){
   data <- subset(data, select = c(PositionX, PositionY))
   matrix_data <- as.matrix(data)
   file = i
-  db <- dbscan(matrix_data, eps = 30)
+  db <- dbscan(matrix_data, eps = 45)
   assign(paste("db_",file,sep = ""),db)
 }
 
 #list_of_eps_values = (10,10)
 
-subset_data <- as.matrix(subset(averaged_full_data_C0,  averaged_full_data_C0$image == "abstract_1", select = c(PositionX, PositionY)))
+subset_data <- as.matrix(subset(averaged_full_data_C0,  averaged_full_data_C0$image == "abstract_2", select = c(PositionX, PositionY)))
 
-db_test <- dbscan(matrix_data,eps = )
+#test_data <- subset(averaged_full_data_C0,  averaged_full_data_C0$image == #"fig_1", select = c(PositionX, PositionY))
 
-plot  <-  fviz_cluster(db_abstract_1, subset_data, stand = FALSE, geom = 'point') +
+#kNNdistplot(subset_data,k=4) + abline(h = 30, col = "red", lty = 2)
+
+#db_test <- dbscan(subset_data,eps = 40)
+
+#out <- kNNdist(subset_data, k = 4)
+#print(kNNdistplot(subset_data, k = 4))
+
+img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_fig1.png')
+g <- grid::rasterGrob(img, interpolate = T)
+
+#test_plot <- ggplot(test_data, aes(x = PositionX, y = PositionY)) +
+#   xlim(0,1600) +
+#  ylim(0,900)+ 
+#  annotation_custom(g, xmin = 0, xmax = 1600, ymin = 0, ymax = 900) + geom_point(color = 'red') +
+#  ggtitle("'The street performers in the night' by Marc Chagall")
+
+
+subset_data <- as.matrix(subset(averaged_full_data_C0,  averaged_full_data_C0$image == "fig_12", select = c(PositionX, PositionY)))
+plot  <-  fviz_cluster(db_fig_12, subset_data, stand = FALSE, geom = 'point', main = "'The Family' by Egon Schiele") +
   xlim(0,1600) +
   ylim(0,900)
 

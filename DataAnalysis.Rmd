@@ -7,11 +7,13 @@ editor_options:
   chunk_output_type: console
 ---
 The analysis consits of:
-1. Data cleaning
+1. Data cleaning and preliminary data exploration
 2. Sparseness calculation
 3. Preparing data to analysis in Matlab (rocScore calulation from gbvs)
-4. Analysis on Matlab data (outcome of gbvs)
-5.
+4. Cluster definition using dbscan - vizualisations 
+5. Analysis on Matlab data (outcome of gbvs) - glmer models and visualizations
+6. AOI analysis - 1) from sal maps, 2) from dbscan, 3) from theory
+7. Transition matrices 
 
 
 Steps: 
@@ -60,7 +62,7 @@ Scaling the ET data (viewing times are varied)
   ET: looking at the effect of saliency
   NB: The whole dataset (averaged across participants) vs. fixations only in   clusters   (so AOI defined from the fixations)?)
   
-  First five fixations vs. the rest of the fixations. 
+  First 10 fixations vs. the rest of the fixations. 
   
   ROC and AUC - accuracy
   
@@ -74,8 +76,11 @@ Transition behavior between clusters?
 ###Loading packages
 ```{r}
 library(pacman)
-p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,gtools, factoextra)
-library(ggimage)
+p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,gtools,wesanderson)
+library(factoextra)
+library(ggforce)
+library(concaveman)
+library(RColorBrewer)
 #library(edfReader)
 ```
 
@@ -85,53 +90,36 @@ library(ggimage)
 BehaveDat = read.csv("DataBsC/BehavioralData_New.csv") #<-- using data from the Bachelor to test code
 BehaveDat = subset(BehaveDat, select = -c(X))
 
-SacDat = read.csv("DataBsc/SaccadesData_New.csv",header = T)
-SacDat = subset(SacDat, select = -c(X))
-SacDat = subset(SacDat, select = -c(Number_sac))
-SacDat = subset(SacDat,SacDat$Duration < 80) #Removing artifacts
+Fix_df = read.csv('Old_fixation_data.csv')
+Fix_df = subset(Fix_df, select = -c(X))
 
-FixDat = read.csv("DataBsC/FixationsData_New.csv", header = T)
-FixDat = subset(FixDat, select = -c(X))
-FixDat = subset(FixDat, select = -c(Number_fix))
-FixDat = subset(FixDat,FixDat$Duration > 200) #Removing artifacts
-
-count = group_by(FixDat,image,ID) %>% summarize(Number_fix=n())
-countSac = group_by(SacDat,image,ID) %>% summarize(Number_sac=n())
-Fix_df = plyr::join(FixDat,count)
-Sac_df = plyr::join(SacDat,countSac)
-Fix_df$PositionY = round((901-Fix_df$PositionY),2) #Data was flipped - make sure to check if this is also the case for new data
-
-#Renaming images - change accordingly depending on stimulus names
-Fix_df$image = str_replace_all(Fix_df$image,"images_",'')
-Fix_df$image = str_replace_all(Fix_df$image,"\\\\",'')
-Fix_df$image = str_replace_all(Fix_df$image,"rothko",'')
-Fix_df$image = str_replace_all(Fix_df$image,"pollock",'')
-Fix_df$image = str_replace_all(Fix_df$image,"schiele",'')
-Fix_df$image = str_replace_all(Fix_df$image,"chagall",'')
-Fix_df$image = str_replace_all(Fix_df$image,".png",'')
-
-#remove(FixDat)
-#remove(SacDat)
-#remove(count)
-#remove(countSac)
-
-#First 10 fixations on each image
-Fix_df_10Fix <-
-Fix_df %>% 
-  group_by(ID,image) %>% 
-  filter(row_number()==1:10)
+Fix_df_10Fix = read.csv('Old_data_10Fix.csv')
+Fix_df_10Fix = subset(Fix_df_10Fix, select = -c(X))
 
 #Recap:
-#Fix_df = full dataset
-#Fix_df_10Fix = first 10 fixations on each image for each participants
+#Fix_df is the full dataset with all fixations
+#Fix_df_10Fix includes only the first 10 fixations on each image for each participant
 
-#merge with results from sparseness analysis:
+#Merge with results from sparseness analysis:
 sparsenessResults <- read.csv('SparsenessResults.csv')
 sparsenessResults <- subset(sparsenessResults, select = -c(X))
 Fix_df_10Fix <- merge(Fix_df_10Fix,sparsenessResults)
 Fix_df_10Fix <- Fix_df_10Fix[order(Fix_df_10Fix[,2], Fix_df_10Fix[,18]),]
 
 #rm(sparsenessResults)
+
+#Reading in AUC scores - full set
+auc_df <- read.csv('AUC_scores_nowWithAllPart.csv')
+auc_df <- merge(auc_df,sparsenessResults)
+auc_df <- subset(auc_df, select = -c(X))
+auc_df <- auc_df[order(auc_df[,1], auc_df[,2],auc_df[,4]),]
+
+
+#Reading in AUC scores - five first seconds (missing P1 and P13)
+auc_5s <- read.csv('AUC_scores_5sec.csv')
+auc_5s <- merge(auc_5s,sparsenessResults)
+auc_5s <- subset(auc_5s, select = -c(X))
+auc_5s <- auc_5s[order(auc_5s[,1], auc_5s[,2],auc_5s[,3]),]
 
 ```
 
@@ -307,18 +295,14 @@ SP = ggplot(subset(test_fix, image == "fig_11" & ID == 1), aes(x = PositionX, y 
   geom_text(aes(label = Counter, size = 5)) +
   ggtitle("Participant X")
 
-#Remove fixations that is not on the stimulus?
-
 ```
 
 Cluster definition using DBSCAN
 
 ```{r}
-#Testing dbscan
-
 #Dbscan should be on full data set?
 
-averaged_full_data_C1 <- subset(Fix_df, Fix_df$condition == 1) %>%
+averaged_full_data <- subset(Fix_df) %>%
   group_by(image) %>%
   mutate(Counter = sequence(rle(ID)$lengths)) %>%
   ungroup() %>%
@@ -327,94 +311,283 @@ averaged_full_data_C1 <- subset(Fix_df, Fix_df$condition == 1) %>%
     PositionX = median(PositionX),
     PositionY = median(PositionY)
   )
-
-averaged_full_data_C0 <- subset(Fix_df, Fix_df$condition == 0) %>%
-  group_by(image) %>%
-  mutate(Counter = sequence(rle(ID)$lengths)) %>%
-  ungroup() %>%
-  group_by(image, Counter) %>%
-  summarize(
-    PositionX = median(PositionX),
-    PositionY = median(PositionY)
-  )
-#test <- subset(test, select = c(PositionX,PositionY)) #selecting fixations position only
-#test <- as.matrix(test) #dbscan works with matrices
-#kNNdistplot(test,k=4) + abline(h = 60, col = "red", lty = 2) #use knn distance plot to determine optimal eps value - look for where the data changes significantly (from linear to exponential)
-#db <- dbscan(test, eps = 40) #run cluster analysis
-
 
 #Generate kNN distance plots to determine optimal eps value - look for where the data changes significantly
-for(i in unique(averaged_full_data_C0$image)){
-  data <- subset(averaged_full_data_C0, image == i)
+
+kNN_df <- data.frame(image = numeric(),
+                     optimal_eps = numeric())
+
+for(i in unique(averaged_full_data$image)){
+  kNN_df[nrow(kNN_df) + 1,] = c(image = i, optimal_eps = NA)
+  data <- subset(averaged_full_data, image == i)
   data <- subset(data, select = c(PositionX, PositionY))
   matrix_data <- as.matrix(data)
   print(kNNdistplot(matrix_data,k=4))
 }
 
+#Change eps value accordingly
+kNN_df$optimal_eps[1] = 42
+kNN_df$optimal_eps[2] = 47
+kNN_df$optimal_eps[3] = 40
+kNN_df$optimal_eps[4] = 48
+kNN_df$optimal_eps[5] = 49
+kNN_df$optimal_eps[6] = 47
+kNN_df$optimal_eps[7] = 49
+kNN_df$optimal_eps[8] = 55
+kNN_df$optimal_eps[9] = 46
+kNN_df$optimal_eps[10] = 42
+kNN_df$optimal_eps[11] = 49
+kNN_df$optimal_eps[12] = 48
+kNN_df$optimal_eps[13] = 45
+kNN_df$optimal_eps[14] = 50
+kNN_df$optimal_eps[15] = 48
+kNN_df$optimal_eps[16] = 50
+kNN_df$optimal_eps[17] = 49
+kNN_df$optimal_eps[18] = 46
+kNN_df$optimal_eps[19] = 48
+kNN_df$optimal_eps[20] = 32
+kNN_df$optimal_eps[21] = 49
+kNN_df$optimal_eps[22] = 46
+kNN_df$optimal_eps[23] = 45
+kNN_df$optimal_eps[24] = 41
+kNN_df$optimal_eps[25] = 40
+kNN_df$optimal_eps[26] = 45
+kNN_df$optimal_eps[27] = 43
+kNN_df$optimal_eps[28] = 40
+kNN_df$optimal_eps[29] = 42
+kNN_df$optimal_eps[30] = 32
+kNN_df$optimal_eps[31] = 42
+kNN_df$optimal_eps[32] = 41
+kNN_df$optimal_eps[33] = 43
+kNN_df$optimal_eps[34] = 43
+kNN_df$optimal_eps[35] = 45
+kNN_df$optimal_eps[36] = 47
+kNN_df$optimal_eps[37] = 40
+kNN_df$optimal_eps[38] = 45
+kNN_df$optimal_eps[39] = 49
+kNN_df$optimal_eps[40] = 45
+
+kNN_df$optimal_eps <- as.numeric(kNN_df$optimal_eps)
+
 #Run cluster analysis using dbscan and save outcome
-#Need to be done: add the optimal eps value for each image
-for(i in unique(averaged_full_data_C0$image)){
-  data <- subset(averaged_full_data_C0, image == i)
+num = 1
+for(i in unique(averaged_full_data$image)){
+  data <- subset(averaged_full_data, image == i)
   data <- subset(data, select = c(PositionX, PositionY))
   matrix_data <- as.matrix(data)
   file = i
-  db <- dbscan(matrix_data, eps = 45)
+  db <- dbscan::dbscan(matrix_data, eps = kNN_df$optimal_eps[num], minPts = 3, borderPoints = FALSE)
   assign(paste("db_",file,sep = ""),db)
+  num = num + 1
 }
 
-#list_of_eps_values = (10,10)
+temp <- as.data.frame(db_fig_11$cluster) # 0 = noise, 1 = cluster - change db results accordingly
+temp <- plyr::rename(temp, c('db_fig_11$cluster'= 'cluster')) #change db results accrodingly
+temp$cluster <- as.factor(temp$cluster)
+temp$cluster <- plyr::revalue(temp$cluster, c('0' = 'Noise','1'= 'Core'))
 
-subset_data <- as.matrix(subset(averaged_full_data_C0,  averaged_full_data_C0$image == "abstract_2", select = c(PositionX, PositionY)))
+plot_data <- subset(averaged_full_data, averaged_full_data$image == 'fig_11', select = c(PositionX,PositionY)) #change data subset accordingly
 
-#test_data <- subset(averaged_full_data_C0,  averaged_full_data_C0$image == #"fig_1", select = c(PositionX, PositionY))
+plot_data <- cbind(plot_data,temp)
 
-#kNNdistplot(subset_data,k=4) + abline(h = 30, col = "red", lty = 2)
-
-#db_test <- dbscan(subset_data,eps = 40)
-
-#out <- kNNdist(subset_data, k = 4)
-#print(kNNdistplot(subset_data, k = 4))
-
-img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_fig1.png')
+img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_fig11.png') #change png accordingly
 g <- grid::rasterGrob(img, interpolate = T)
 
-#test_plot <- ggplot(test_data, aes(x = PositionX, y = PositionY)) +
-#   xlim(0,1600) +
-#  ylim(0,900)+ 
-#  annotation_custom(g, xmin = 0, xmax = 1600, ymin = 0, ymax = 900) + geom_point(color = 'red') +
-#  ggtitle("'The street performers in the night' by Marc Chagall")
-
-
-subset_data <- as.matrix(subset(averaged_full_data_C0,  averaged_full_data_C0$image == "fig_12", select = c(PositionX, PositionY)))
-plot  <-  fviz_cluster(db_fig_12, subset_data, stand = FALSE, geom = 'point', main = "'The Family' by Egon Schiele") +
+ggplot(plot_data, aes(x = PositionX, y = PositionY, color = cluster)) +
   xlim(0,1600) +
-  ylim(0,900)
+  ylim(0,900)+ 
+  annotation_custom(g, xmin = 0, xmax = 1600, ymin = 0, ymax = 900) +
+  geom_point(size = 1.5, shape = 'circle') +
+  geom_mark_ellipse(data = subset(plot_data, plot_data$cluster == 'Core'),expand=0,aes(fill=cluster), show.legend = F)+
+  #scale_color_brewer(palette = 'Greens', direction = 1)+
+  scale_color_manual(values = wes_palette(n = 2, name ="Darjeeling1")) +
+  ggtitle("'Fighter' by Egon Schiele") #change name and color scheme accordingly
 
-img = "DataBsC/heatmaps_scanpaths_images/screenshot_fig1.png"
-
-ggbackground(plot,img) #yeah that doesn't work   
-
-bkg_img <- png::readPNG("DataBsC/heatmaps_scanpaths_images/screenshot_fig1.png")
-pairs(test, col = db$cluster + 1L) #clusters seperated by axis
-plot(test, col = db$cluster + 1L) #clusters = red, noise points = black
-limits <- par() 
-rasterImage(bkg_img, limits$usr[1], limits$usr[3], limits$usr[2], limits$usr[4]) 
-points(test[db$cluster==0,], pch = 3, col = "grey")
-
-img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_abs1.png')
-g <- grid::rasterGrob(img, interpolate = T)
-
-test <- as.data.frame(test)
-
-plot_2 <- ggplot(test, aes(x = PositionX, y = PositionY)) +
-  xlim(0,1600) +
-  ylim(0,900) +
-  annotation_custom(g, xmin=-0, xmax=1600, ymin=-0, ymax=900) +
-  geom_point()
-
-#Prettier visualization - How to add a background image?
-plot  <-  fviz_cluster(db, test, stand = FALSE, geom = "point", main = "Cluster formation in 'Number 8' by Jackson Pollock") +
-  xlim(0,1600) +
-  ylim(0,900)
+#Other visualizations
+#pairs(matrix_data, col = db$cluster + 1L) #clusters seperated by axis
+#plot(matrix_data, col = db$cluster + 1L) #clusters = red, noise points = black
+#points(matrix_data[db$cluster==0,], pch = 3, col = "grey")
 ```
+
+Analysis and visualization of AUC data
+
+```{r}
+
+#These AUC scores was calculated from the 10 first fixations for each participant for each image
+auc_df$condition <- as.factor(auc_df$condition)
+auc_df$condition=plyr::revalue(auc_df$condition,c("0"="Non-experts","1"="Experts"))
+auc_df$genre <- str_replace_all(auc_df$genre,"_","")
+
+auc_5s$condition <- as.factor(auc_5s$condition)
+
+#Plots
+plot_data <- auc_df %>%
+  group_by(condition, map_type,peak_group) %>%
+  summarize(
+    mean = mean(AUC),
+    sd = sd(AUC),
+    se = sd(AUC) / sqrt(length(AUC))
+  )
+
+pd <- position_dodge(0.5)
+
+ggplot(plot_data, aes(x=condition, y=mean, colour=map_type)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_line(position = pd) +
+    geom_point(position = pd) +
+    facet_wrap(~peak_group) +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Salience effects for the first 10 fixations') +
+    ylim(0.75,1) +
+    scale_color_manual(values = wes_palette(n = 4, name ="GrandBudapest1"))
+
+#Barplot - only for one type of plot
+ggplot(subset(plot_data, plot_data$map_type == "combined"), aes(x = condition, y = mean, fill = condition)) + 
+  geom_col() + 
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1) +
+  facet_wrap(~peak_group) +
+  scale_fill_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+  ggtitle('Salience effects for the first 10 fixations') +
+  xlab('Condition') +
+  ylab('mean salience effects (AUCs)') +
+  guides(fill = "none")
+
+#Over fixation index
+
+auc_df$Fixation_Index <- as.numeric(auc_df$Fixation_Index)
+
+#Full data set
+plot_data <- subset(auc_df, auc_df$map_type == 'combined') %>%
+  group_by(Fixation_Index,condition, genre,map_type, peak_group) %>%
+  summarize(
+    mean = mean(AUC),
+    sd = sd(AUC),
+    se = sd(AUC) / sqrt(length(AUC))
+  )
+
+plot_data$Fixation_Index <- as.character(plot_data$Fixation_Index)
+#test_full$condition <- as.character(test_full$condition)
+
+ggplot(subset(plot_data, plot_data$peak_group == 'few'), aes(x=Fixation_Index, y=mean, color = condition)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_point(position = pd) +
+    geom_line(aes(group = condition), position = pd) +
+    xlab('fixation index') +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Variation of salience effects over fixations') +
+    ylim(0.7,1)+
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10"))+
+    scale_color_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+    facet_wrap(~genre)
+
+ggplot(subset(plot_data, plot_data$peak_group == 'many'), aes(x=Fixation_Index, y=mean, color = condition)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_point(position = pd) +
+    geom_line(aes(group = condition), position = pd) +
+    xlab('fixation index') +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Variation of salience effects over fixations') +
+    ylim(0.65,1)+
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10"))+
+    scale_color_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+    facet_wrap(~genre)
+
+
+#Full data set - first five seconds
+plot_data <- auc_5s %>%
+  group_by(condition, map_type,peak_group) %>%
+  summarize(
+    mean = mean(AUC),
+    sd = sd(AUC),
+    se = sd(AUC) / sqrt(length(AUC))
+  )
+
+ggplot(plot_data, aes(x=condition, y=mean, colour=map_type)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_line(position = pd) +
+    geom_point(position = pd) +
+    facet_wrap(~peak_group) +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Salience effects for the first 10 fixations') +
+    ylim(0.75,1) +
+    scale_color_manual(values = wes_palette(n = 4, name ="GrandBudapest1"))
+
+#Barplot - only for one type of plot
+ggplot(subset(plot_data, plot_data$map_type == "combined"), aes(x = condition, y = mean, fill = condition)) + 
+  geom_col() + 
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1) +
+  facet_wrap(~peak_group) +
+  scale_fill_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+  ggtitle('Salience effects for the first 10 fixations') +
+  xlab('Condition') +
+  ylab('mean salience effects (AUCs)') +
+  guides(fill = "none")
+
+plot_data <- subset(auc_5s, auc_5s$map_type == 'combined') %>%
+  group_by(Fixation_Index,condition, genre,map_type, peak_group) %>%
+  summarize(
+    mean = mean(AUC),
+    sd = sd(AUC),
+    se = sd(AUC) / sqrt(length(AUC))
+  )
+
+plot_data$Fixation_Index <- as.character(plot_data$Fixation_Index)
+#test_full$condition <- as.character(test_full$condition)
+
+plot_data <- na.omit(plot_data)
+plot_data <- subset(plot_data, plot_data$Fixation_Index != '14')
+
+ggplot(subset(plot_data, plot_data$peak_group == 'few'), aes(x=Fixation_Index, y=mean, color = condition)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_point(position = pd) +
+    geom_line(aes(group = condition), position = pd) +
+    xlab('fixation index') +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Variation of salience effects over fixations') +
+    ylim(0.7,1)+
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10"))+
+    scale_color_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+    facet_wrap(~genre)
+
+ggplot(subset(plot_data, plot_data$peak_group == 'many'), aes(x=Fixation_Index, y=mean, color = condition)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_point(position = pd) +
+    geom_line(aes(group = condition), position = pd) +
+    xlab('fixation index') +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Variation of salience effects over fixations') +
+    ylim(0.65,1)+
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10"))+
+    scale_color_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+    facet_wrap(~genre)
+
+#stat_summary(fun = mean,geom="line",aes(group=1))
+
+##Models
+
+#Scale variables?
+#rescalelist = c("AUC") #making a list with variales we want to scale
+#auc_df.s = auc_df[, colnames(auc_df) %in% rescalelist] %>% 
+>#  lapply(.,function(x) scale(x,center= mean(x,na.rm = T), scale = sd(x, na.rm = T)))%>% 
+  #cbind(.,auc_df[,! colnames(auc_df) %in% rescalelist]) 
+
+
+#time_df <- read.csv('combined_rocScores_variationOverFix.csv')
+AUC_data_full$ID <- as.integer(AUC_data_full$ID)
+AUC_data_full$genre <- as.factor(AUC_data_full$genre)
+AUC_data_full$Fixation_Index <- factor(AUC_data_full$Fixation_Index, ordered = T)
+
+subset_df <- subset(AUC_data_full, AUC_data_full$map_type == 'combined')
+
+
+m1 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group + 
+             (1 + condition*Fixation_Index*peak_group|ID) + 
+             (1 + condition*Fixation_Index*peak_group|image), 
+           data = subset_df, 
+           control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+m2 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group + (1|ID)+(1|image),data = subset_df)
+
+```
+
 

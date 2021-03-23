@@ -339,6 +339,9 @@ start_time <- proc.time()
   
   # set current stimulus
   current_stimuli_data <- Fix_df[Fix_df$image == "abstract_12",] #Contain all fix for one image for both conditions
+  current_stimuli_data$PositionX <- round(current_stimuli_data$PositionX)
+  current_stimuli_data$PositionY <- round(current_stimuli_data$PositionY)
+  
   current_stimuli_data$MediaWidth <- 935 #Add to actual dataset
   current_stimuli_data$MediaHeight <- 675 #Add to actual dataset
   
@@ -434,4 +437,22 @@ print(proc.time() - start_time)
 
 
 #Levenstein distance?
+library(stringdist)
+string_P1 <- subset(cond_zero,cond_zero$participant == 1)
+string_P1$AOI <- as.character(string_P1$AOI)
+string_P8 <- subset(cond_one, cond_one$participant == 8)
+string_P8$AOI <- as.character(string_P8$AOI)
 
+data_test <- aggregate(AOI ~ participant, data = cond_one, FUN = paste, collapse = "")
+
+data_test_1 <- aggregate(AOI ~ participant, data = cond_zero, FUN = paste, collapse = "")
+
+
+#WHY SO FEW FIXATIONS?????  
+test_distance <- stringdistmatrix(string_P1$AOI,string_P8$AOI,method = 'lv')
+#the higher the number, the more different are they - more transformation (i.e. deletion, insertion or substution) is taken place
+#When looking at only two participants it make sense that the AOI are very similar - there is only so many transformations needed when a string is very short
+
+test_distance <- stringdistmatrix(data_test_1$AOI,method = 'lv')
+
+test_distance <- as.data.frame(test_distance)

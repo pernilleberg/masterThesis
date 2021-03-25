@@ -238,20 +238,20 @@ Scanpaths and heatmaps
 #Acessing quality of ET data?
 #Subsetting dataframe to make heatmaps for 4 chosen images - two abs, two fig (one for each artist)
 
-img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_fig11.png')
+img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_abs12.png')
 g <- grid::rasterGrob(img, interpolate = T)
 
 jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
 
 #One participant, one image
-heatmap_P1 <- ggplot(subset(Fix_df, ID==1 & image=='fig_11'),aes(x = PositionX, y = PositionY)) +
+heatmap_P1 <- ggplot(subset(Fix_df, ID==1 & image=='abstract_12'),aes(x = PositionX, y = PositionY)) +
   xlim(0,1600) +
   ylim(0, 900) +
   annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
   stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) +
 scale_alpha(range = c(0.1, 0.6)) + scale_fill_gradientn(colours = jet.colors(10), trans='sqrt')
 
-averaged_full_data <- Fix_df %>%
+averaged_heatmaps <- Fix_df %>%
   group_by(image) %>%
   mutate(Counter = sequence(rle(ID)$lengths)) %>%
   ungroup() %>%
@@ -263,7 +263,7 @@ averaged_full_data <- Fix_df %>%
 
 #Heatmaps
 aveHM <-
-  ggplot(subset(averaged_full_data,image == "fig_11"),aes(x =PositionX, y = PositionY)) +
+  ggplot(subset(averaged_full_data,image == "abstract_12"),aes(x =PositionX, y = PositionY)) +
   xlim(0,1600) +
   ylim(0,900) +
   annotation_custom(g,xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
@@ -286,7 +286,7 @@ test_fix <- Fix_df %>%
   group_by(image) %>%
   mutate(Counter = sequence(rle(ID)$lengths))
 
-SP = ggplot(subset(test_fix, image == "fig_11" & ID == 1), aes(x = PositionX, y = PositionY)) +
+SP = ggplot(subset(test_fix, image == "abstract_12" & ID == 2), aes(x = PositionX, y = PositionY)) +
   xlim(0,1600) +
   ylim(0,900) +
   annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
@@ -302,15 +302,18 @@ Cluster definition using DBSCAN
 ```{r}
 #Dbscan should be on full data set?
 
-averaged_full_data <- subset(Fix_df) %>%
+averaged_full_data <- Fix_df %>%
   group_by(image) %>%
-  mutate(Counter = sequence(rle(ID)$lengths)) %>%
-  ungroup() %>%
+  mutate(Counter = sequence(rle(ID)$lengths))
+
+Test <- averaged_full_data %>%
   group_by(image, Counter) %>%
-  summarize(
+    summarize(
     PositionX = median(PositionX),
     PositionY = median(PositionY)
-  )
+) #WHY YOU NOT WORK????
+
+
 
 #Generate kNN distance plots to determine optimal eps value - look for where the data changes significantly
 
@@ -324,6 +327,11 @@ for(i in unique(averaged_full_data$image)){
   matrix_data <- as.matrix(data)
   print(kNNdistplot(matrix_data,k=4))
 }
+
+data <- subset(averaged_full_data, averaged_full_data$image == 'abstract_12')
+data <- subset(averaged_full_data, select = c(PositionX, PositionY))
+matrix_data <- as.matrix(data)
+print(kNNdistplot(matrix_data,k=4))
 
 #Change eps value accordingly
 kNN_df$optimal_eps[1] = 42
@@ -499,8 +507,12 @@ plot_data <- auc_5s %>%
   summarize(
     mean = mean(AUC),
     sd = sd(AUC),
-    se = sd(AUC) / sqrt(length(AUC))
+    se = sd(AUC) / sqrt(length(AUC)),
+    lower_bound = mean - se,
+    upper_bound = mean + se
   )
+
+
 
 ggplot(plot_data, aes(x=condition, y=mean, colour=map_type)) + 
     geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
@@ -508,7 +520,7 @@ ggplot(plot_data, aes(x=condition, y=mean, colour=map_type)) +
     geom_point(position = pd) +
     facet_wrap(~peak_group) +
     ylab('mean salience effects (AUCs)') +
-    ggtitle('Salience effects for the first 10 fixations') +
+    ggtitle('Salience effects for the first five seconds') +
     ylim(0.75,1) +
     scale_color_manual(values = wes_palette(n = 4, name ="GrandBudapest1"))
 

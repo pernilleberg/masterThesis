@@ -96,7 +96,7 @@ determineImageOffset <- function(data, stimuli)
   return(c(horizontal_offset, vertical_offset))
 }
 
-#This doesn't work - prints only the bkg image, not the grid
+#This doesn't work - prints only the bkg image, not the grid - added a solution below
 drawGrid <- function(grid_args, stimuli)
 {
   # load and plot the stimulus image
@@ -109,7 +109,6 @@ drawGrid <- function(grid_args, stimuli)
   dims <- attr(bkg_img, "dim")
 }
 
-#This just seem plain weird - I don't now how to interpret the 'coordinates' for grid offset
 determineGridOffset <- function(width, height, grid_len)
 {
   x_offset <- (width / grid_len) - floor(width / grid_len)
@@ -150,6 +149,63 @@ addAOIlabels <- function(letter_len)
 
 generateTransitionData <- function(data, condition_num, grid_args, perm_trans = FALSE)
 {
+    #data = current_stimuli_data
+    #condition_num = 1
+    #perm_trans = FALSE
+    data_frames <- list()
+    mat <- matrix(addAOIlabels(grid_args$num_cells), nrow = grid_args$num_rows, ncol = grid_args$num_cols, byrow = TRUE)
+  
+    participant_vector <- NULL
+    AOI_vector <- NULL
+  
+  # get specified condition
+    if(!perm_trans){
+        condition <- data[data$condition == condition_num, ]
+    } else {
+        condition <- data
+    }
+  
+  # get the participants for the selected condition
+    participants <- as.vector(condition[!duplicated(condition$ID), "ID"]) #Name of ID column
+  
+    for(i in 1:length(participants)){
+    # get participant
+      participant_data <- data[data$ID == participants[i], ] #i
+    
+      for(j in 1:nrow(participant_data)) #go through all rows in dataset
+      {
+          for(m in grid_args$num_rows:1) #go through all rows in the grid
+          {
+              for(n in 1:grid_args$num_cols) #go trough all columns in the grid
+              {
+          # calculate relative position of cell
+                  cell_x <- grid_args$images_offsets[1] + grid_args$grid_offsets[1] + (grid_args$dims * (n - 1))
+                  cell_y <- grid_args$images_offsets[2] + grid_args$grid_offsets[2] + (grid_args$dims * (m - 1))
+          
+          # detect hit inside cell
+                  hit <- detectCellHits(cell_x, cell_y, grid_args$dims, participant_data[j, ])
+                  if(hit)
+                  {
+                      AOI_vector <- c(AOI_vector, mat[m, n])
+                  }
+              }
+          }
+      }
+      AOIs <- addAOIlabels(grid_args$num_cells)
+      participant_vector <- rep(participants[i], length(AOI_vector))
+      df <- data.frame(participant = participant_vector, AOI = AOI_vector)
+      df$AOI <- factor(df$AOI, levels = AOIs)
+    
+    # add data frame to list
+      data_frames[[i]] <- df
+      participant_data <- NULL
+    }
+    hit_data <- ldply(data_frames, data.frame)
+  
+    return(hit_data)    
+}
+
+generateTransitionData_new <- function(data, condition_num, grid_args, perm_trans = FALSE){
   data_frames <- list()
   mat <- matrix(addAOIlabels(grid_args$num_cells), nrow = grid_args$num_rows, ncol = grid_args$num_cols, byrow = TRUE)
   
@@ -164,27 +220,22 @@ generateTransitionData <- function(data, condition_num, grid_args, perm_trans = 
   }
   
   # get the participants for the selected condition
-  participants <- as.vector(condition[!duplicated(condition$ID), "ID"]) #Name of ID column
+  participants <- as.vector(condition[!duplicated(condition$ID), "ID"])
   
-  for(i in 1:length(participants))
-  {
+  for(i in 1:length(participants)){
     # get participant
     participant_data <- data[data$ID == participants[i], ]
     
-    for(j in 1:nrow(participant_data))
-    {
-      for(m in grid_args$num_rows:1)
-      {
-        for(n in 1:grid_args$num_cols)
-        {
+    for(j in 1:nrow(participant_data)){
+      for(m in grid_args$num_rows:1){
+        for(n in 1:grid_args$num_cols){
           # calculate relative position of cell
           cell_x <- grid_args$images_offsets[1] + grid_args$grid_offsets[1] + (grid_args$dims * (n - 1))
           cell_y <- grid_args$images_offsets[2] + grid_args$grid_offsets[2] + (grid_args$dims * (m - 1))
           
           # detect hit inside cell
           hit <- detectCellHits(cell_x, cell_y, grid_args$dims, participant_data[j, ])
-          if(hit)
-          {
+          if(hit){
             AOI_vector <- c(AOI_vector, mat[m, n])
           }
         }
@@ -339,8 +390,8 @@ start_time <- proc.time()
   
   # set current stimulus
   current_stimuli_data <- Fix_df[Fix_df$image == "abstract_12",] #Contain all fix for one image for both conditions
-  current_stimuli_data$PositionX <- round(current_stimuli_data$PositionX)
-  current_stimuli_data$PositionY <- round(current_stimuli_data$PositionY)
+  #current_stimuli_data$PositionX <- round(current_stimuli_data$PositionX)
+  #current_stimuli_data$PositionY <- round(current_stimuli_data$PositionY)
   
   current_stimuli_data$MediaWidth <- 935 #Add to actual dataset
   current_stimuli_data$MediaHeight <- 675 #Add to actual dataset
@@ -390,6 +441,7 @@ start_time <- proc.time()
   
   conditions1_participants <- current_stimuli_data[current_stimuli_data$condition == "1", ]
   conditions1_participants <- as.vector(conditions1_participants[!duplicated(conditions1_participants$ID), "ID"])
+  
   
   # get transition data for both condition groups
   cond_one <- generateTransitionData(current_stimuli_data, 1, grid_args)

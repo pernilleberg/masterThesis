@@ -67,7 +67,7 @@ determineImageOffset <- function(data, stimuli)
   stimuli_image_str <- gsub("abstract", "abs", current_stimuli_data$image)
   stimuli_image_str <- gsub("_", "", stimuli_image_str)
   stimuli_image_str <- paste('screenshot_',stimuli_image_str, sep = "")
-  bkg_img <- readPNG(paste0(getwd(), "/DataBsC/heatmaps_scanpaths_images/", stimuli_image_str, ".png"), info = TRUE)
+  bkg_img <- readPNG(paste0(getwd(), "/DataBsC/heatmaps_scanpaths_images/", stimuli_image_str, ".png"), info = TRUE) #change working directory accordingly
   plot.new()
   limits <- par()
   
@@ -164,7 +164,120 @@ addAOIlabels <- function(letter_len)
 ```
 
 ```{r}
+randomPermutations <- function(data, group1_size, grid_args, perms = 10)
+{
+  progress <- 0
+  distances <- numeric(perms)
+  
+  # extract participants
+  participants <- as.data.frame(data[!duplicated(data$ID), "ID"]) #Name of participant ID coloumn - change accordingly
+  colnames(participants) <- "participant"
+  
+  # create progress bar
+  progress_bar <- winProgressBar(title = "Computing Distances", min = 0, max = perms, width = 300)
+  getWinProgressBar(progress_bar)
+  
+  for(i in 1:perms)
+  {
+    # get a random subset of participants and store in group 1 whatever is left put in second group
+    group1_participants <- participants[sample(unique(nrow(participants)), group1_size), ]
+    group2_participants <- as.vector(participants[!(participants$participant %in% group1_participants), ])
+    
+    # extract groups
+    group1 <- data[which(data$ID %in% group1_participants), ] #Name of participant ID column - change accordingly
+    group2 <- data[which(data$ID %in% group2_participants), ] #Name of participant ID column - change accordingly
+    
+    # generate transition data
+    group1_trans <- generateTransitionData(group1, NA, grid_args, perm_trans = TRUE)
+    group2_trans <- generateTransitionData(group2, NA, grid_args, perm_trans = TRUE)
+    
+    # convert to matrix format
+    m1 <- convertToMatrix(group1_trans)
+    m2 <- convertToMatrix(group2_trans)
+    
+    # trim rows and cols containing 0 in both matrices
+    trimed_mats <- trimMatrixZeros(m1, m2)
+    m1 <- trimed_mats[[1]]
+    m2 <- trimed_mats[[2]]
+    
+    # convert to probability matrices
+    m1 <- convertToProbMatrix(m1)
+    m2 <- convertToProbMatrix(m2)
+    
+    # get distance 
+    distance_result <- HellDistance(m1, m2) 
+    
+    # store computed distance in vector and return
+    distances[i] <- distance_result
+    
+    # display progress bar
+    setWinProgressBar(progress_bar, i, title = paste(round(i / perms * 100, 0), "% processed [Computing Distance]"))
+  }
+  # close the progress bar
+  close(progress_bar)
+  
+  return(distances)
+}
 
+#Not sure how to interpret this - testing the different between randomly generated transitions and actual conditions?
+calculatePvalue <- function(distance, shuffled_distances)
+{
+  gtr <- length(shuffled_distances[shuffled_distances > distance])
+  pvalue <- gtr / length(shuffled_distances) 
+  return(pvalue)
+}
+
+#Not sure about this either
+generateDensityPlot <- function(distance_result, shuffled_distances, stimuli_data)
+{
+  density_plot <- density(shuffled_distances)
+  plot(density_plot, type = "n", main = unique(stimuli_data$image), xlab = "Hellinger Distance")
+  polygon(density_plot, col = "lightgray", border = "grey")
+  rug(shuffled_distances, col = ifelse(shuffled_distances == distance_result, 'blue', 'red'))
+  print(abline(v = distance_result, col = "purple"))
+  print(density_plot)
+}
+
+
+outputReport <- function(report_args)
+{
+  cat("\n\nData: ", report_args[["dataname"]], "\n")
+  df <- data.frame(JSD = report_args[["HEL"]], p.value = report_args[["p-value"]], Permutations = report_args[["permutations"]])
+  print(df) 
+  cat("\nGroup 1 (n): ", report_args[["groupsize1"]])
+  cat("\nGroup 2 (n): ", report_args[["groupsize2"]], "\n")  
+}
+
+
+HellDistance <- function(m1,m2)
+{
+  length_of_matrix <- nrow(m1)
+  HPQ <- 0; HJ <- 0
+  for (i in 1:length_of_matrix)
+  {
+    for (j in 1:length_of_matrix)
+    {
+      HJ <- HJ + ((sqrt(m1[i, j]) - sqrt(m2[i, j])) ^ 2)
+    }
+    HPQ <- HPQ + ((1 / sqrt(2)) * sqrt(HJ))
+    HJ <- 0
+  }
+  return(HPQ / length_of_matrix) 
+}
+
+#Not used?
+convertToPrior <- function(data)
+{
+  m <- 0
+  matrix_len <- nrow(data) 
+  for(i in 1:matrix_len)
+  {
+    m <- sum(data[i, ] * 10)
+    for(j in 1:matrix_len)
+      data[i, j] <- ((data[i, j] * 10) + 1) / (m + matrix_len)
+  }
+  return(data)
+}
 
 
 ```
@@ -222,9 +335,25 @@ generateTransitionData <- function(data, condition_num, grid_args, perm_trans = 
 
 
 ```{r}
+permutations <- 2
+num_conditions <- 2
+gridsizes <- c(42, 50, 45, 49, 48, 44, 40, 43) * 2 # eps values from DBSCAN - change accordingly
+
+#Load packages
+library(pacman)
+p_load(msm,png,gplots,dplyr,plyr,matrixStats,topicmodels,lattice)
+
+# time the execution of the code
+start_time <- proc.time()
+
+#To loop over stimuli:
+#for (i in unique(fix_df$image)){
+  
+m1 <- NULL
+m2 <- NULL
+
 current_stimuli_data <- Fix_df[Fix_df$image == "abstract_12",] #Contain all fix for one image for both conditions
 current_stimuli_data$MediaWidth <- 935 #Add to actual dataset
-
 current_stimuli_data$MediaHeight <- 675 #Add to actual dataset
   
   # calculate dimensions / offsets

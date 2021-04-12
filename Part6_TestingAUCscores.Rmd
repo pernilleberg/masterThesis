@@ -1,0 +1,231 @@
+---
+title: 'Part 6: Testing AUC scores'
+author: "Pernille Berg Lassen"
+date: "31/3/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#Load packages - ONLY IF NOT RUN IN A PREVIOUS PART
+#library(pacman)
+#p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,
+#       gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,lattice,
+#       factoextra,ggforce,msm,plyr,dplyr,gplots)
+```
+
+```{r}
+#Reading in AUC scores - full set, first 10 fixations
+auc_df <- read.csv('AUC_scores_10Fix.csv')
+auc_df <- merge(auc_df,sparsenessResults)
+auc_df <- subset(auc_df, select = -c(X))
+auc_df <- auc_df[order(auc_df[,1], auc_df[,2],auc_df[,4]),]
+
+
+#Reading in AUC scores - five first seconds (missing P1 and P13)
+auc_5s <- read.csv('AUC_scores_5sec.csv')
+auc_5s <- merge(auc_5s,sparsenessResults)
+auc_5s <- subset(auc_5s, select = -c(X))
+auc_5s <- auc_5s[order(auc_5s[,1], auc_5s[,2],auc_5s[,3]),]
+
+```
+
+
+```{r}
+#These AUC scores was calculated from the 10 first fixations for each participant for each image
+auc_df$condition <- as.factor(auc_df$condition)
+auc_df$condition=plyr::revalue(auc_df$condition,c("0"="Non-experts","1"="Experts"))
+auc_df$genre <- str_replace_all(auc_df$genre,"_","")
+
+auc_5s$condition <- as.factor(auc_5s$condition)
+
+#Plots
+
+plot_data <- auc_df %>%
+  dplyr::group_by(condition, map_type, peak_group) %>%
+  dplyr::summarize(
+    mean = mean(AUC),
+    sd = sd(AUC),
+    se = sd(AUC)/sqrt(length(AUC))
+  )
+
+pd <- position_dodge(0.5)
+
+ggplot(plot_data, aes(x=condition, y=mean, colour=map_type)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_line(position = pd) +
+    geom_point(position = pd) +
+    facet_wrap(~peak_group) +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Salience effects for the first 10 fixations') +
+    ylim(0.75,1) +
+    scale_color_manual(values = wes_palette(n = 4, name ="GrandBudapest1"))
+
+#Barplot - only for one type of plot
+ggplot(subset(plot_data, plot_data$map_type == "combined"), aes(x = condition, y = mean, fill = condition)) + 
+  geom_col() + 
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1) +
+  facet_wrap(~peak_group) +
+  scale_fill_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+  ggtitle('Salience effects for the first 10 fixations') +
+  xlab('Condition') +
+  ylab('mean salience effects (AUCs)') +
+  guides(fill = "none")
+
+#Over fixation index
+
+auc_df$Fixation_Index <- as.numeric(auc_df$Fixation_Index)
+
+#Full data set
+plot_data <- subset(auc_df, auc_df$map_type == 'combined') %>%
+  group_by(Fixation_Index,condition, genre,map_type, peak_group) %>%
+  summarize(
+    mean = mean(AUC),
+    sd = sd(AUC),
+    se = sd(AUC) / sqrt(length(AUC))
+  )
+
+plot_data$Fixation_Index <- as.character(plot_data$Fixation_Index)
+#test_full$condition <- as.character(test_full$condition)
+
+ggplot(subset(plot_data, plot_data$peak_group == 'few'), aes(x=Fixation_Index, y=mean, color = condition)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_point(position = pd) +
+    geom_line(aes(group = condition), position = pd) +
+    xlab('fixation index') +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Variation of salience effects over fixations') +
+    ylim(0.7,1)+
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10"))+
+    scale_color_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+    facet_wrap(~genre)
+
+ggplot(subset(plot_data, plot_data$peak_group == 'many'), aes(x=Fixation_Index, y=mean, color = condition)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_point(position = pd) +
+    geom_line(aes(group = condition), position = pd) +
+    xlab('fixation index') +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Variation of salience effects over fixations') +
+    ylim(0.65,1)+
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10"))+
+    scale_color_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+    facet_wrap(~genre)
+
+
+#Full data set - first five seconds
+plot_data <- auc_5s %>%
+  group_by(condition, map_type,peak_group) %>%
+  summarize(
+    mean = mean(AUC),
+    sd = sd(AUC),
+    se = sd(AUC) / sqrt(length(AUC)),
+    lower_bound = mean - se,
+    upper_bound = mean + se
+  )
+
+auc_5s$condition=plyr::revalue(auc_5s$condition,c("0"="Non-experts","1"="Experts"))
+
+ggplot(plot_data, aes(x=condition, y=mean, colour=map_type)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_line(position = pd) +
+    geom_point(position = pd) +
+    facet_wrap(~peak_group) +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Salience effects for the first five seconds') +
+    ylim(0.75,1) +
+    scale_color_manual(values = wes_palette(n = 4, name ="GrandBudapest1"))
+
+#Barplot - only for one type of map
+ggplot(subset(plot_data, plot_data$map_type == "combined"), aes(x = condition, y = mean, fill = condition)) + 
+  geom_col() + 
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1) +
+  facet_wrap(~peak_group) +
+  scale_fill_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+  ggtitle('Salience effects for the first 10 fixations') +
+  xlab('Condition') +
+  ylab('mean salience effects (AUCs)') +
+  guides(fill = "none")
+
+
+plot_data <- subset(auc_5s, auc_5s$map_type == 'combined') %>%
+  group_by(Fixation_Index,condition, genre,map_type, peak_group) %>%
+  summarize(
+    mean = mean(AUC),
+    sd = sd(AUC),
+    se = sd(AUC) / sqrt(length(AUC))
+  )
+
+
+plot_data$Fixation_Index <- as.character(plot_data$Fixation_Index)
+#test_full$condition <- as.character(test_full$condition)
+
+plot_data <- na.omit(plot_data)
+plot_data <- subset(plot_data, plot_data$Fixation_Index != '14')
+
+ggplot(subset(plot_data, plot_data$peak_group == 'few'), aes(x=Fixation_Index, y=mean, color = condition)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_point(position = pd) +
+    geom_line(aes(group = condition), position = pd) +
+    xlab('fixation index') +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Variation of salience effects over fixations') +
+    ylim(0.7,1)+
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11",
+                              "12","13","14"))+
+    scale_color_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+    facet_wrap(~genre)
+
+ggplot(subset(plot_data, plot_data$peak_group == 'many'), aes(x=Fixation_Index, y=mean, color = condition)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position = pd) +
+    geom_point(position = pd) +
+    geom_line(aes(group = condition), position = pd) +
+    xlab('fixation index') +
+    ylab('mean salience effects (AUCs)') +
+    ggtitle('Variation of salience effects over fixations') +
+    ylim(0.65,1)+
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10",
+                              "11","12","13","14"))+
+    scale_color_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
+    facet_wrap(~genre)
+
+#stat_summary(fun = mean,geom="line",aes(group=1))
+
+```
+
+Models
+
+```{r}
+
+#Scale variables?
+#rescalelist = c("AUC") #making a list with variales we want to scale
+#auc_df.s = auc_df[, colnames(auc_df) %in% rescalelist] %>% 
+#  lapply(.,function(x) scale(x,center= mean(x,na.rm = T), 
+#                             scale = sd(x, na.rm = T))) %>% 
+#  cbind(.,auc_df[,! colnames(auc_df) %in% rescalelist]) 
+
+#AUC_data_full$ID <- as.integer(AUC_data_full$ID)
+#AUC_data_full$genre <- as.factor(AUC_data_full$genre)
+#AUC_data_full$Fixation_Index <- factor(AUC_data_full$Fixation_Index, ordered = T)
+
+#m1 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group + 
+#             (1 + condition*Fixation_Index*peak_group|ID) + 
+#             (1 + condition*Fixation_Index*peak_group|image), 
+#           data = auc_df, 
+#           control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+###Troubles with this model - doesn't run
+
+#summary(m1)
+
+m2 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group*map_type + (1|ID) + (1|image),data = auc_df)
+summary(m2)
+#Comment: using condition, fixation index, peak group and map type as predictors. Including ID and image as random effects. Allowing each participant and each image to have indiviudal slopes. A significant effect of peak group and fixation index and intensity.
+
+
+m3 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group + (1|ID) + (1|image), data = auc_5s)
+summary(m3)
+
+m4 <- lmer(AUC ~  1 + condition*Fixation_Index*peak_group*map_type*genre + (1|ID) + (1|image),data = auc_df)
+#Comment: using data from the five first seconds - more effects - it is actually only condition that shows no effect. 
+```

@@ -1,0 +1,216 @@
+---
+title: "Part 4: Preliminary data exploration and visualization"
+author: "Pernille Berg Lassen"
+date: "30/3/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#Load packages - ONLY NECESSARY IF PREVIOUS PARTS HAVE NOT BEEN RUN
+#library(pacman)
+#p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,
+#       gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,lattice,
+#       factoextra,ggforce,convaveman,msm,plyr,dplyr,gplots)
+
+#Load data
+Fix_df <- read.csv('Fix_data_BSC.csv') #Dataset containing all fixations
+Fix_df = subset(Fix_df, select = -c(X))
+Fix_df <- Fix_df[order(Fix_df[,2], Fix_df[,18]),] 
+#Change coloumn numbers accrodingly
+
+Fix_df_10Fix <- read.csv('Old_data_10Fix.csv') #Dataset contaning the first 10 fixations on each image for each participant
+Fix_df_10Fix = subset(Fix_df_10Fix, select = -c(X))
+Fix_df_10Fix <- Fix_df[order(Fix_df_10Fix[,2], Fix_df_10Fix[,18]),] 
+#Change coloumn numbers accrodingly
+
+Fix_df_fiveS <- read.csv('fixations_first10seconds.csv') #Dataset containing the fixations within the first five seconds on each image for each participant
+Fix_df_fiveS = subset(Fix_df_fiveS, select = -c(X))
+Fix_df_fiveS <- Fix_df_fiveS[order(Fix_df_fiveS[,2], Fix_df_fiveS[,18]),] #Change coloumn numbers accrodingly
+
+BehaveDat <- read.csv('DataBsC/BehavioralData_New.csv')
+BehaveDat <- subset(BehaveDat, select = -c(X))
+
+```
+
+Vizualizations and preliminary data-exploration
+
+```{r}
+#Demographics
+
+Dat_grouped = group_by(BehaveDat,ID,gender,condition,age) %>% summarize()
+
+sum(Dat_grouped$gender == 'Female' & Dat_grouped$condition == 1) 
+sum(Dat_grouped$gender == 'Female' & Dat_grouped$condition == 0) 
+sum(Dat_grouped$gender == 'Male' & Dat_grouped$condition == 1) 
+sum(Dat_grouped$gender == 'Male' & Dat_grouped$condition == 0)
+round(mean(Dat_grouped$age),2)
+round(sd(Dat_grouped$age),2)
+round(mean(Dat_grouped$age[Dat_grouped$condition == 1]),2)
+round(sd(Dat_grouped$age[Dat_grouped$condition == 1]),2)
+round(mean(Dat_grouped$age[Dat_grouped$condition == 0]),2)
+round(sd(Dat_grouped$age[Dat_grouped$condition == 0]),2)
+
+#Image familarity 
+
+Image_grouped = group_by(BehaveDat, ID, image, q7, artist, genre) %>% summarize()
+img_fam = subset(Image_grouped,Image_grouped$q7 == 'yes')
+img_fam = group_by(img_fam,image, artist, genre)  %>% summarize(Number_yes=n())
+img_fam$Number_yes = sort(img_fam$Number_yes, decreasing = T)
+
+summary(img_fam$artist) 
+summary(img_fam$genre)
+
+sum(img_fam$Number_yes[img_fam$artist == 'chagall']) #change with relevant artist names
+sum(img_fam$Number_yes[img_fam$artist == 'schiele'])
+sum(img_fam$Number_yes[img_fam$artist == 'rothko'])
+sum(img_fam$Number_yes[img_fam$artist == 'pollock'])
+
+sum(img_fam$Number_yes[img_fam$genre == 'fig'])
+sum(img_fam$Number_yes[img_fam$genre == 'abstract'])
+
+
+#Art interest
+art_interest <- BehaveDat %>% #summarizing results from art interest questionaire
+  group_by(ID) %>%
+  summarize(
+    q8 = q8[1],
+    q9 = q9[1],
+    q10 = q10[1],
+    q11 = q11[1],
+    condition = condition[1]
+  )
+
+#How many participants have taken art-classes?
+
+length(art_interest$ID[art_interest$q11 == "yes" & art_interest$condition == 1])
+length(art_interest$ID[art_interest$q11 == "yes" & art_interest$condition == 0])
+
+art_interest$condition = as.factor(art_interest$condition)
+
+art_interest$condition = plyr::revalue(art_interest$condition, c("1"= "Experts", "0"= "Non-Experts"))
+
+all_part <- ggplot(art_interest, aes(x = q8)) +
+  geom_bar(fill = "#99CCFF") +
+  xlab("Ratings: Question X") +
+  ylab("Participant counts") +
+  theme_minimal()
+  #How to change the values on the y-axis?
+
+#Bar plots
+bar_plot <- ggplot(art_interest, aes(x = q8)) + 
+  geom_bar(fill = "#99CCFF") + 
+  facet_wrap(~condition) + 
+  xlab("Ratings: Question X") + 
+  ylab("Partcipant counts") + 
+  theme_minimal()
+
+box_plot <- ggplot(art_interest,aes(y=q9,x=condition)) +
+  geom_boxplot(color = "#336699", fill = "#6699CC") +
+  xlab("Condition") +
+  ylab("Rating") +
+  ggtitle("Question X") + 
+  coord_cartesian(ylim = c(1, 7)) +
+  theme_minimal()
+
+#Leaving an axis label blank: theme(axis.title.y = element_blank())
+
+ggarrange(all_part,bar_plot) #what plots to display next to one another?
+
+
+```
+
+Testing art-interest
+
+```{r}
+#Mean and SD
+art_interest %>%
+  group_by(condition) %>%
+  summarize(
+    mean_q8 = round(mean(q8),2),
+    sd_q8 = round(sd(q8),2),
+    mean_q9 = round(mean(q9),2),
+    sd_q9 = round(sd(q9),2),
+    mean_q10 = round(mean(q10),2),
+    sd_q10 = round(sd(q10),2)
+  )
+
+#testing assumptions - what to test?
+
+model <- glm(condition ~ q8, family = 'binomial', art_interest) #one model per question or one model with all questions?
+summary(model)
+
+
+```
+
+Scanpaths and heatmaps
+
+```{r}
+#Acessing quality of ET data?
+#Subsetting dataframe to make heatmaps for 4 chosen images - two abs, two fig (one for each artist)
+
+img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_abs12.png')
+g <- grid::rasterGrob(img, interpolate = T)
+
+jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
+
+#One participant, one image
+heatmap_P1 <- ggplot(subset(Fix_df, ID==1 & image=='abstract_12'),aes(x = PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0, 900) +
+  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) +
+scale_alpha(range = c(0.1, 0.6)) + scale_fill_gradientn(colours = jet.colors(10), trans='sqrt')
+
+averaged_heatmaps <- Fix_df %>%
+  group_by(image) %>%
+  mutate(Counter = sequence(rle(ID)$lengths)) %>%
+  ungroup() %>%
+  group_by(image, Counter) %>%
+  summarize(
+    PositionX = median(PositionX),
+    PositionY = median(PositionY)
+  )
+
+#Heatmaps
+aveHM <-
+  ggplot(subset(averaged_full_data,image == "abstract_12"),aes(x =PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0,900) +
+  annotation_custom(g,xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) + scale_alpha(range = c(0.1, 0.6)) +
+  scale_fill_gradientn(colours = jet.colors(10), trans='sqrt') + ggtitle("All Participants")
+
+#Scanpaths
+aveSP = ggplot(subset(averaged_full_data, image == "fig_11"), aes(x = PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0,900) +
+  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  geom_point(size = 8, alpha = 0.5, color = "white") + 
+  geom_path(size = 1, alpha = 0.3) + 
+  geom_text(aes(label = Counter, size = 5)) +
+  ggtitle("All Participants")
+
+#One participant
+test_fix <- Fix_df %>%
+  group_by(image) %>%
+  mutate(Counter = sequence(rle(ID)$lengths))
+
+SP = ggplot(subset(test_fix, image == "abstract_12" & ID == 2), aes(x = PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0,900) +
+  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  geom_point(size = 8, alpha = 0.5, color = "white") + 
+  geom_path(size = 1, alpha = 0.3) + 
+  geom_text(aes(label = Counter, size = 5)) +
+  ggtitle("Participant X")
+
+```
+
+
+
+```{r}
+
+
+```

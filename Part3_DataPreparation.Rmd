@@ -1,0 +1,91 @@
+---
+title: 'Part 3: Data preparation'
+author: "Pernille Berg Lassen"
+date: "31/3/2021"
+output: html_document
+---
+Creating the different fixation datasets used for analysis. Include the full set, and two smaller subsets containing 1) the first 10 fixations on each image for each participant, and 2) fixations within the first five seconds on each image for each participant
+
+```{r}
+#Load packages - ONLY IF NOT RUN IN PART 2  
+#library(pacman)
+#p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,
+#       gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,lattice,
+#       factoextra,ggforce,convaveman,msm,plyr,dplyr,gplots)
+```
+
+```{r}
+#Full data set
+FixDat = read.csv("DataBsC/FixationsData_New.csv", header = T)
+FixDat = subset(FixDat, select = -c(X))
+FixDat = subset(FixDat, select = -c(Number_fix))
+FixDat = subset(FixDat,FixDat$Duration > 200) #Removing artifacts
+
+count = group_by(FixDat,image,ID) %>% 
+  summarize(Number_fix=n())
+Fix_df = plyr::join(FixDat,count)
+Fix_df$PositionY = round((901-Fix_df$PositionY),2) #Data was flipped - make sure to check if this is also the case for new data
+
+#Renaming images - change accordingly depending on stimulus names
+Fix_df$image = str_replace_all(Fix_df$image,"images_",'')
+Fix_df$image = str_replace_all(Fix_df$image,"\\\\",'')
+Fix_df$image = str_replace_all(Fix_df$image,"rothko",'')
+Fix_df$image = str_replace_all(Fix_df$image,"pollock",'')
+Fix_df$image = str_replace_all(Fix_df$image,"schiele",'')
+Fix_df$image = str_replace_all(Fix_df$image,"chagall",'')
+Fix_df$image = str_replace_all(Fix_df$image,".png",'')
+
+#Adding height and width of images if not already in the dataset
+Fix_df$MediaHeight <- 675
+Fix_df$MediaWidth <- NA
+
+abstract_widths <- c(470, 565, 595, 390, 681, 510,505,570,555,415,900,935,866,935,424,505,853,566,510,532)
+abstract_imgs <- mixedsort(unique(Fix_df$image[Fix_df$genre == "abstract"]))
+
+figurative_widths <- c(645,519,975,469,486,537,523,479,546,1215,449,722,1043,383,475,473,543,513,507,1147)
+figurative_imgs <- mixedsort(unique(Fix_df$image[Fix_df$genre == "fig"]))
+
+n = 1
+for (i in abstract_imgs){
+  Fix_df$MediaWidth[Fix_df$image == i] <- abstract_widths[n]
+  n = n + 1
+}
+
+n = 1
+for (i in figurative_imgs){
+  Fix_df$MediaWidth[Fix_df$image == i] <- figurative_widths[n]
+  n = n + 1
+}
+
+#Merge with sparseness results (Part 2)
+sparsenessResults <- read.csv('SparsenessResults.csv')
+sparsenessResults <- subset(sparsenessResults, select = -c(X))
+Fix_df_10Fix <- merge(Fix_df_10Fix,sparsenessResults)
+Fix_df_10Fix <- Fix_df_10Fix[order(Fix_df_10Fix[,2], Fix_df_10Fix[,18]),]
+
+write.csv(Fix_df, 'Fix_data_BSC.csv')
+
+#Dataset containing the 10 fixations on each image for each participant
+Fix_df_10Fix <-
+  Fix_df %>% 
+  group_by(ID,image) %>% 
+  filter(row_number()==1:10)
+
+write.csv(Fix_df_10Fix,'Old_data_10Fix.csv')
+
+#Dataset containing fixations within the first five seconds for each participant
+temp_df <- subset(Fix_df, select = c(ID, image, sttime, entime))
+
+temp_df <- temp_df %>%
+  group_by(image,ID) %>% 
+  summarise(trial_stattime = sttime[1])
+
+temp_df <- merge(Fix_df,temp_df)
+
+temp_df$time_passed <- temp_df$entime - temp_df$trial_stattime
+temp_df$time_passed <- temp_df$time_passed/1000 #In seconds
+
+Fix_df_fiveS <- subset(temp_df, temp_df$time_passed <= 5)
+
+write.csv(Fix_df_fiveS,'fixations_first5seconds.csv')
+

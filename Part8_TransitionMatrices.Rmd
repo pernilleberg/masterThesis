@@ -1,0 +1,672 @@
+---
+title: "Part 8: Transition matrices"
+author: "Pernille Berg Lassen"
+date: "25/3/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#Functions adapted from Davies et al. (2017)
+convertToMatrix <- function(data)
+{
+  tmp0 <- data
+  tmp <- tmp0 %>% group_by(participant) %>% mutate(to = lead(AOI))
+  tmp2 <- tmp[complete.cases(tmp), ]
+  with(tmp2, table(AOI, to))
+  out_mat <- as.matrix(with(tmp2, table(AOI, to)))
+  diag(out_mat) <- 0
+  return(out_mat)
+}
+
+#-----------------------------------
+convertToProbMatrix <- function(data)
+{
+  prob_mat <- data / rowSums(data)
+  prob_mat[is.na(prob_mat)] <- 0
+  return(prob_mat)
+}
+
+#-----------------------------------
+trimMatrixZeros <- function(m1, m2)
+{
+  matrix_list <- list()
+  row_col_to_remove <- NULL
+  
+  for(x in 1:nrow(m1))
+  {
+    if((rowSums(m1)[x] == 0) && (rowSums(m2)[x] == 0))
+    {  
+      if((colSums(m1)[x] == 0) && (colSums(m2)[x] == 0))
+      {
+        row_col_to_remove <- c(row_col_to_remove, x)
+      }
+    }
+  } 
+  
+  if(length(row_col_to_remove) > 0)
+  {
+    # removed the selected rows and columns
+    m1 <- m1[-row_col_to_remove, ]; m1 <- m1[, -row_col_to_remove] 
+    m2 <- m2[-row_col_to_remove, ]; m2 <- m2[, -row_col_to_remove] 
+    
+    # store in list entries
+    matrix_list[[1]] <- m1
+    matrix_list[[2]] <- m2
+    
+    return(matrix_list)
+  }
+  return(FALSE)
+}
+
+```
+
+```{r}
+#-----------------------------------
+determineImageOffset <- function(data, stimuli)
+{
+  # load and plot the stimulus image
+  stimuli_image_str <- gsub("abstract", "abs", stimuli$image)
+  stimuli_image_str <- gsub("_", "", stimuli_image_str)
+  stimuli_image_str <- paste('screenshot_',stimuli_image_str, sep = "")
+  bkg_img <- readPNG(paste0(getwd(), "/DataBsC/heatmaps_scanpaths_images/", 
+                            stimuli_image_str, "_newbg.png"), info = TRUE) 
+  #change working directory accordingly
+  plot.new()
+  limits <- par()
+  
+  # get the dimensions
+  dims <- attr(bkg_img, "dim")
+  
+  # get vertical offset
+  for(i in 1:dims[1])
+  {
+    # get the center point of image and pixel value
+    row_offset <- floor(dims[2] / 2)
+    px <- bkg_img[i, row_offset, 1:3]
+    
+    # get offset if pixel colour is not black
+    if((px[1] > 0) || (px[2] > 0) || (px[3] > 0))
+    {
+      vertical_offset <- (i - 1)
+      break
+    }
+  }
+  
+  # get horizontal offset
+  for(i in 1:dims[2])
+  {
+    # get the center point of image and pixel value
+    col_offset <- floor(dims[1] / 2)
+    px <- bkg_img[col_offset, i, 1:3]
+    
+    # get offset if pixel colour is not black
+    if((px[1] > 0) || (px[2] > 0) || (px[3] > 0))
+    {
+      horizontal_offset <- (i - 1)
+      break
+    }
+  }
+  return(c(horizontal_offset, vertical_offset))
+}
+
+#-----------------------------------
+#This only prints image?
+drawGrid <- function(grid_args, stimuli)
+{
+  # load and plot the stimulus image
+  stimuli_image_str <- gsub("abstract", "abs", stimuli$image)
+  stimuli_image_str <- gsub("_", "", stimuli_image_str)
+  stimuli_image_str <- paste('screenshot_',stimuli_image_str, sep = "")
+  bkg_img <- readPNG(paste0(getwd(), "/DataBsC/heatmaps_scanpaths_images/", 
+                            stimuli_image_str, "_newbg.png"), info = TRUE) 
+  #NB: newbg - images with a black background
+  limits <- par()
+  rasterImage(bkg_img, limits$usr[1], limits$usr[3], limits$usr[2],
+              limits$usr[4])
+  abline(v=grid_args$grid_offsets[1], col = "lightgray",lty='dotted')
+  abline(h=grid_args$grid_offsets[2], col = "lightgray",lty='dotted')
+  
+  for (i in 1:grid_args$num_cols){
+    abline(v=grid_args$grid_offsets[1]+
+             ((((1-grid_args$grid_offset[1])-
+                  grid_args$grid_offsets[1])/
+                 grid_args$num_cols)*i),col= "lightgray",lty='dotted')
+  }
+  for (i in 1:grid_args$num_rows){
+    abline(h=grid_args$grid_offsets[2]+
+             ((((1-grid_args$grid_offset[2])-
+                  grid_args$grid_offsets[2])/
+                 grid_args$num_rows)*i),col= "lightgray",lty='dotted')
+  }
+  dims <- attr(bkg_img, "dim")
+}
+
+
+#-----------------------------------
+determineGridOffset <- function(width, height, grid_len)
+{
+  x_offset <- (width / grid_len) - floor(width / grid_len)
+  y_offset <- (height / grid_len) - floor(height / grid_len)
+  return(c(x_offset, y_offset))
+}
+
+
+```
+
+```{r}
+#-----------------------------------
+detectCellHits <- function(cell_x, cell_y, cell_len, data)
+{
+  # extract data
+  data <- data[1, c("PositionX", "PositionY")] #Name of the coloumn that contains x and y coordinates
+  fixation_x <- data[1, 1]
+  fixation_y <- data[1, 2]
+  
+  # return no hit for any missing data
+  if(is.na(fixation_x) || is.na(fixation_y))
+  {
+    return(FALSE)
+  }
+  
+  # check present inside cell 
+  if((fixation_x > cell_x && fixation_x < (cell_x + cell_len)) && 
+     (fixation_y > cell_y && fixation_y < (cell_y + cell_len)))
+  {
+    return(TRUE)
+  }
+  return(FALSE)
+}
+#-----------------------------------
+addAOIlabels <- function(letter_len) 
+{
+  a <- rep(LETTERS, length.out = letter_len)
+  grp <- cumsum(a == "A")
+  vapply(seq_along(a), function(x) paste(rep(a[x], grp[x]), collapse = ""), character(1L))
+}
+
+```
+
+```{r}
+#-----------------------------------
+randomPermutations <- function(data, group1_size, grid_args, perms = 10)
+{
+  progress <- 0
+  distances <- numeric(perms)
+  
+  # extract participants
+  participants <- as.data.frame(data[!duplicated(data$ID), "ID"]) 
+  #Name of participant ID coloumn - change accordingly
+  colnames(participants) <- "participant"
+  
+  # create progress bar
+  progress_bar <- winProgressBar(title = "Computing Distances", min = 0, 
+                                 max = perms, width = 300)
+  getWinProgressBar(progress_bar)
+  
+  for(i in 1:perms)
+  {
+# get a random subset of participants and store in group 1 whatever is left put in second group
+    group1_participants <- participants[sample(unique(nrow(participants)), 
+                                               group1_size), ]
+    group2_participants <- 
+      as.vector(participants[!(participants$participant %in%
+                                 group1_participants), ])
+    
+    # extract groups
+    group1 <- data[which(data$ID %in% group1_participants), ] 
+    #Name of participant ID column - change accordingly
+    group2 <- data[which(data$ID %in% group2_participants), ] 
+    #Name of participant ID column - change accordingly
+    
+    # generate transition data
+    group1_trans <- generateTransitionData(group1, NA, grid_args, 
+                                           perm_trans = TRUE)
+    group2_trans <- generateTransitionData(group2, NA, grid_args, 
+                                           perm_trans = TRUE)
+    
+    # convert to matrix format
+    m1 <- convertToMatrix(group1_trans)
+    m2 <- convertToMatrix(group2_trans)
+    
+    # trim rows and cols containing 0 in both matrices
+    trimed_mats <- trimMatrixZeros(m1, m2)
+    if (length(trimed_mats) == 2) {
+      m1 <- trimed_mats[[1]]
+      m2 <- trimed_mats[[2]]
+    }
+    
+    # convert to probability matrices
+    m1 <- convertToProbMatrix(m1)
+    m2 <- convertToProbMatrix(m2)
+    
+    # get distance 
+    distance_result <- HellDistance(m1, m2) 
+    
+    # store computed distance in vector and return
+    distances[i] <- distance_result
+    
+    # display progress bar
+    setWinProgressBar(progress_bar, i, 
+                      title = paste(round(i / perms * 100, 0), 
+                                    "% processed [Computing Distance]"))
+  }
+  # close the progress bar
+  close(progress_bar)
+  
+  return(distances)
+}
+
+#-----------------------------------
+calculatePvalue <- function(distance, shuffled_distances)
+{
+  gtr <- length(shuffled_distances[shuffled_distances > distance])
+  pvalue <- gtr / length(shuffled_distances) 
+  return(pvalue)
+}
+
+#Not sure about this either
+
+generateDensityPlot <- function(distance_result, shuffled_distances,
+                                stimuli_data)
+{
+  density_plot <- density(shuffled_distances)
+  plot(density_plot, type = "n", main = unique(stimuli_data$image), 
+       xlab = "Hellinger Distance")
+  polygon(density_plot, col = "lightgray", border = "grey")
+  rug(shuffled_distances, 
+      col = ifelse(shuffled_distances == distance_result, 'blue', 'red'))
+  print(abline(v = distance_result, col = "purple"))
+  print(density_plot)
+}
+
+#-----------------------------------
+HellDistance <- function(m1,m2)
+{
+  length_of_matrix <- nrow(m1)
+  HPQ <- 0; HJ <- 0
+  for (i in 1:length_of_matrix)
+  {
+    for (j in 1:length_of_matrix)
+    {
+      HJ <- HJ + ((sqrt(m1[i, j]) - sqrt(m2[i, j])) ^ 2)
+    }
+    HPQ <- HPQ + ((1 / sqrt(2)) * sqrt(HJ))
+    HJ <- 0
+  }
+  return(HPQ / length_of_matrix) 
+}
+
+#-----------------------------------
+#Not used?
+convertToPrior <- function(data)
+{
+  m <- 0
+  matrix_len <- nrow(data) 
+  for(i in 1:matrix_len)
+  {
+    m <- sum(data[i, ] * 10)
+    for(j in 1:matrix_len)
+      data[i, j] <- ((data[i, j] * 10) + 1) / (m + matrix_len)
+  }
+  return(data)
+}
+
+
+```
+
+```{r}
+#-----------------------------------
+generateTransitionData <- function(data, condition_num, grid_args, perm_trans = FALSE){
+  data_frames <- list()
+  mat <- matrix(addAOIlabels(grid_args$num_cells), nrow = grid_args$num_rows,
+                ncol = grid_args$num_cols, byrow = TRUE)
+  
+  participant_vector <- NULL
+  AOI_vector <- NULL
+  
+  if(!perm_trans){
+        condition <- data[data$condition == condition_num, ]
+    } else {
+        condition <- data
+    }
+  
+  participants <- as.vector(condition[!duplicated(condition$ID), "ID"]) #Name of ID column
+  
+  for (i in 1:length(participants)){
+    participant_data <- data[data$ID == participants[i],]
+    for (j in 1:nrow(participant_data)){
+      for (m in grid_args$num_rows:1){
+        for (n in 1:grid_args$num_cols){
+          cell_x <- grid_args$images_offsets[1] + grid_args$grid_offsets[1] +
+            (grid_args$dims * (n - 1))
+          cell_y <- grid_args$images_offsets[2] + grid_args$grid_offsets[2] +
+            (grid_args$dims * (m - 1))
+          
+          hit <- detectCellHits(cell_x, cell_y, grid_args$dims,
+                                participant_data[j, ])
+          if(hit){
+             AOI_vector <- c(AOI_vector, mat[m, n])
+          }
+        }
+      }
+    }
+    AOIs <- addAOIlabels(abs(grid_args$num_cells))
+    participant_vector <- rep(participants[i], length(AOI_vector))
+    df <- data.frame(participant = participant_vector, AOI = AOI_vector)
+    df$AOI <- factor(df$AOI, levels = AOIs)
+    
+    # add data frame to list
+    data_frames[[i]] <- df
+    participant_data <- NULL
+    AOI_vector <- NULL
+  }
+  hit_data <- plyr::ldply(data_frames, data.frame)
+  return(hit_data)  
+}
+
+```
+
+
+```{r}
+permutations <- 10 #how many permuations? 351 = all possible combinations - with two permutations it take a little more than 60 minutes to run for all images.
+num_conditions <- 2
+
+gridsizes <- kNN_df# eps values from DBSCAN
+gridsizes$optimal_eps <- gridsizes$optimal_eps*2 
+
+#Load packages
+library(pacman)
+p_load(msm,png,gplots,dplyr,plyr,matrixStats,topicmodels,lattice)
+
+# time the execution of the code
+#start_time <- proc.time()
+
+#Starting with a subset of four images:
+testing_matrices_1 <- subset(Fix_df,!is.na(MediaWidth))
+
+#To loop over stimuli:
+results_list_C0 = list()
+results_list_C1 = list()
+distance_df <- data.frame(image = as.numeric(),
+                          Hellinger = as.numeric())
+
+grid_args_list = list()
+
+n = 1
+
+
+
+for (i in unique(testing_matrices_1$image)){
+  m1 <- NULL
+  m0 <- NULL
+  current_stimuli_data <- testing_matrices_1[testing_matrices_1$image == i,]
+
+  # calculate dimensions / offsets
+  grid_args <- list()
+  grid_args[['name']] <- i
+  grid_args[["w"]] <- current_stimuli_data[1, "MediaWidth"] 
+  grid_args[["h"]] <- current_stimuli_data[1, "MediaHeight"]
+  grid_args[["min_dim"]] <- min(grid_args$w, grid_args$h)
+  
+  grid_args[["dims"]] <- gridsizes$optimal_eps[gridsizes$image == i]
+  
+  grid_args[["images_offsets"]] <- determineImageOffset(grid_args$dims,
+                                                        current_stimuli_data)
+  
+  grid_args[["grid_offsets"]] <- determineGridOffset(grid_args$w, grid_args$h,
+                                                     grid_args$dims)
+  if(grid_args[["h"]] < grid_args[["w"]]){
+    grid_args[["num_rows"]] <- 
+      floor((grid_args$min_dim                                
+             -((grid_args$images_offsets[2]*2)+
+                 (grid_args$grid_offsets[2]*2)))/grid_args$dims)
+    grid_args[["num_cols"]] <- grid_args[["num_rows"]]
+  } else {
+    grid_args[["num_cols"]] <-
+      floor((grid_args$min_dim-((grid_args$images_offsets[1]*2)+
+                                (grid_args$grid_offsets[1]*2)))/grid_args$dims)
+    grid_args[["num_rows"]] <- grid_args[["num_cols"]]
+  }
+
+  grid_args[["num_rows"]] <- abs(grid_args$num_rows)
+  grid_args[["num_cols"]] <- abs(grid_args$num_cols)
+  grid_args[["num_cells"]] <- grid_args$num_rows * grid_args$num_cols
+
+  conditions1_participants <-
+    current_stimuli_data[current_stimuli_data$condition == "1", ]
+  
+  conditions1_participants <-
+    as.vector(conditions1_participants[!duplicated(conditions1_participants$ID)
+                                       ,"ID"])
+
+  cond_one <- generateTransitionData(current_stimuli_data, 1, grid_args)
+  cond_zero <- generateTransitionData(current_stimuli_data, 0, grid_args)
+  
+  m1 <- convertToMatrix(cond_one)
+  m0 <- convertToMatrix(cond_zero)
+  
+  trimed_mats <- trimMatrixZeros(m1, m0)
+  if(length(trimed_mats) == 2){
+    m1 <-  trimed_mats[[1]]
+    m0 <-  trimed_mats[[2]]
+    
+  }
+        
+  # convert to probability matrices 
+  m1 <- convertToProbMatrix(m1)
+  m0 <- convertToProbMatrix(m0)
+        
+  # work out distance between correct and incorrect groups
+  distance_result <- HellDistance(m1, m0)
+  
+  #shuffled_distances <- randomPermutations(current_stimuli_data,
+                                           #length(conditions1_participants),
+                                           #grid_args, perms = permutations)
+  
+  cond_one$image <- i
+  cond_zero$image <- i
+  
+  results_list_C0 <- append(results_list_C0,list(cond_zero))
+  results_list_C1 <- append(results_list_C1, list(cond_one))
+  distance_df[nrow(distance_df) + 1,] = c(image = i, 
+                                          Hellinger = distance_result)
+  
+  #shuffled_distances_df$image <- shuffled_distances
+  #shuffled_distances_df <- plyr::rename(shuffled_distances_df, c('image' =
+                                                                   #i))
+  
+  grid_args_list[[n]] <- grid_args
+  n = n + 1
+        
+  # output density plot
+  #generateDensityPlot(distance_result, shuffled_distances, stimuli_data)
+  
+  
+
+}
+
+
+#Carrying out permutations tests
+
+shuffled_distances_df <- data.frame(matrix(ncol=0,nrow=permutations))
+
+
+for (i in unique(testing_matrices_1$image)){
+  current_stimuli_data <- testing_matrices_1[testing_matrices_1$image == i,]
+
+  # calculate dimensions / offsets
+  grid_args <- list()
+  grid_args[['name']] <- i
+  grid_args[["w"]] <- current_stimuli_data[1, "MediaWidth"] 
+  grid_args[["h"]] <- current_stimuli_data[1, "MediaHeight"]
+  grid_args[["min_dim"]] <- min(grid_args$w, grid_args$h)
+  
+  grid_args[["dims"]] <- gridsizes$optimal_eps[gridsizes$image == i]
+  
+  grid_args[["images_offsets"]] <- determineImageOffset(grid_args$dims,
+                                                        current_stimuli_data)
+  
+  grid_args[["grid_offsets"]] <- determineGridOffset(grid_args$w, grid_args$h,
+                                                     grid_args$dims)
+  if(grid_args[["h"]] < grid_args[["w"]]){
+    grid_args[["num_rows"]] <- 
+      floor((grid_args$min_dim                                
+             -((grid_args$images_offsets[2]*2)+
+                 (grid_args$grid_offsets[2]*2)))/grid_args$dims)
+    grid_args[["num_cols"]] <- grid_args[["num_rows"]]
+  } else {
+    grid_args[["num_cols"]] <-
+      floor((grid_args$min_dim-((grid_args$images_offsets[1]*2)+
+                                (grid_args$grid_offsets[1]*2)))/grid_args$dims)
+    grid_args[["num_rows"]] <- grid_args[["num_cols"]]
+  }
+
+  grid_args[["num_rows"]] <- abs(grid_args$num_rows)
+  grid_args[["num_cols"]] <- abs(grid_args$num_cols)
+  grid_args[["num_cells"]] <- grid_args$num_rows * grid_args$num_cols
+
+  conditions1_participants <-
+    current_stimuli_data[current_stimuli_data$condition == "1", ]
+  
+  conditions1_participants <-
+    as.vector(conditions1_participants[!duplicated(conditions1_participants$ID)
+                                       ,"ID"])
+  
+  shuffled_distances <- randomPermutations(current_stimuli_data,
+                                           length(conditions1_participants),
+                                           grid_args, perms = permutations)
+  
+  shuffled_distances_df$image <- shuffled_distances
+  shuffled_distances_df <- plyr::rename(shuffled_distances_df, c('image' = i))
+}
+
+choose(27,2)        
+  # output density plot
+  #generateDensityPlot(distance_result, shuffled_distances, stimuli_data)
+
+#Notes about Hellinger: maximum distance is 1 --> disimilar. Minimum distance is 0 -> similar. So, for my data, they seem very dissimilar. Random permutations to test whether this dissimilarity is because of an actual effect of group. 
+
+pvalue_df <- data.frame(image = as.numeric(),
+                          pvalue = as.numeric())
+
+for (i in distance_df$image){
+  subset_dist <- subset(distance_df, 
+                         distance_df$image == i)
+  subset_dist <- as.numeric(subset_dist$Hellinger)
+  shuffle_subset <- shuffled_distances_df[[paste0(i)]]
+  pv <- calculatePvalue(subset_dist,shuffle_subset)
+  
+  pvalue_df[nrow(pvalue_df) + 1,] = c(image = i, 
+                                      pvalue = pv)
+  
+  
+}
+
+generateDensityPlot(subset(distance_df, distance_df$image == "abstract_4"), shuffled_distances_df$abstract_4, subset(testing_matrices_1,testing_matrices_1$image == "abstract_4"))
+```
+
+
+```{r}
+
+library(stringdist)
+library(reshape2)
+library(ggplot2)
+library(stringr)
+
+get_upper_tri <- function(cormat){
+    cormat[lower.tri(cormat)]<- NA
+    return(cormat)
+}
+
+pal <- brewer.pal(9, "Reds")
+lev_dist <- data.frame(image = as.numeric(),
+                       condition = as.numeric(),
+                       max = as.numeric(),
+                       mean = as.numeric(),
+                       SD = as.numeric())
+
+plot_list_C0 = list()
+for (i in 1:length(results_list_C0)){
+  string_data <- aggregate(AOI ~ participant, data = results_list_C0[[i]], FUN 
+                           = paste, collapse = "")
+  image = results_list_C0[[i]]$image[1]
+  dist <- stringdistmatrix(string_data$AOI, method = 'lv')
+  dist_mat <- as.matrix(dist)
+  dist_df <- as.data.frame(dist_mat)
+  upper_tri <- get_upper_tri(dist_mat)
+  melted_cormat <- reshape2::melt(upper_tri, na.rm = TRUE)
+  
+  lev_dist[nrow(lev_dist) + 1,] = c(image = image,
+                                    condition = 0,
+                                    max = max(dist),
+                                    mean = mean(dist),
+                                    SD = sd(dist))
+  
+  p <- ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+    geom_tile()+
+    scale_fill_gradientn(colors = rev(pal))+
+    scale_x_discrete(limits=c("1","3","4","7","9","12","14","15","16","18","22"
+                              ,"23","25","26"))+
+    scale_y_discrete(limits=c("1","3","4","7","9","12","14","15","16","18","22"
+                              ,"23","25","26"))+
+    ggtitle(paste("Condition 0: Distance matrix for",image, sep = " "))+
+    xlab('Participant ID')+
+    ylab('Participant ID')
+  
+  plot_list_C0[[i]] = p
+}
+
+
+plot_list_C1 = list()
+for (i in 1:length(results_list_C1)){
+  string_data <- aggregate(AOI ~ participant, data = results_list_C1[[i]], FUN 
+                           = paste, collapse = "")
+  image = results_list_C1[[i]]$image[1]
+  dist <- stringdistmatrix(string_data$AOI, method = 'lv')
+  dist_mat <- as.matrix(dist)
+  dist_df <- as.data.frame(dist_mat)
+  upper_tri <- get_upper_tri(dist_mat)
+  melted_cormat <- reshape2::melt(upper_tri, na.rm = TRUE)
+  
+  lev_dist[nrow(lev_dist) + 1,] = c(image = image,
+                                    condition = 1,
+                                    max = max(dist),
+                                    mean = mean(dist),
+                                    SD = sd(dist))
+  
+  
+  p <- ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+    geom_tile()+
+    scale_fill_gradientn(colors = rev(pal))+
+    scale_x_discrete(limits=c("2","5","6","8","10","11","13","17","19","20",
+                              "21","24","27"))+
+    scale_y_discrete(limits=c("2","5","6","8","10","11","13","17","19","20",
+                              "21","24","27"))+
+    ggtitle(paste("Condition 1: Distance matrix for",image, sep = " "))+
+    xlab('Participant ID')+
+    ylab('Participant ID')
+  
+  plot_list_C1[[i]] = p
+}
+
+lev_dist <- lev_dist[order(lev_dist[,1], lev_dist[,2]),]
+
+lev_dist$mean <- as.numeric(lev_dist$mean)
+lev_dist$max <- as.numeric(lev_dist$max)
+lev_dist$SD <- as.numeric(lev_dist$SD)
+lev_dist$condition <- as.factor(lev_dist$condition)
+
+lev_dist$genre = str_extract(lev_dist$image, "abstract|fig")
+
+lev_dist$mean <- round(lev_dist$mean, 3)
+lev_dist$SD <- round(lev_dist$SD,3)
+
+m1 <- lmer(mean ~ 1+condition*genre + (1|image), data = lev_dist)
+#Comment: if model is specified correct, it seems that there is an effect of condition, with condition 1 being more similar than condition 0 (goes against hypothesis) - but direction for genre (figurative being less similar) make sense though it is not significant
+
+
+
+
+```

@@ -1,0 +1,152 @@
+---
+title: 'Part 7: Cluster definition'
+author: "Pernille Berg Lassen"
+date: "31/3/2021"
+output: html_document
+---
+
+Cluster definition using DBSCAN
+
+```{r}
+#Load packages - ONLY IF NOT RUN IN A PREVIOUS PART
+#library(pacman)
+#p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,
+#       gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,lattice,
+#       factoextra,ggforce,convaveman,msm,plyr,dplyr,gplots)
+```
+
+```{r}
+#Dbscan should be on full data set?
+
+averaged_full_data <- Fix_df %>%
+  group_by(image) %>%
+  mutate(Counter = sequence(rle(ID)$lengths)) %>%
+  ungroup() %>%
+  group_by(image, Counter) %>%
+  summarize(
+    PositionX = median(PositionX),
+    PositionY = median(PositionY)
+  )
+
+averaged_full_data <- averaged_full_data[mixedorder(averaged_full_data$image),]
+
+#Generate kNN distance plots to determine optimal eps value - look for where the data changes significantly
+
+kNN_df <- data.frame(image = numeric(),
+                     optimal_eps = numeric())
+
+participants <- unique(Fix_df$ID)
+
+
+for(i in unique(averaged_full_data$image)){
+  kNN_df[nrow(kNN_df) + 1,] = c(image = i, optimal_eps = NA)
+  data <- subset(averaged_full_data, image == i)
+  data <- subset(data, select = c(PositionX, PositionY))
+  matrix_data <- as.matrix(data)
+  print(kNNdistplot(matrix_data,k=4))
+}
+
+#Change eps value accordingly
+kNN_df$optimal_eps[1] = 42
+kNN_df$optimal_eps[2] = 47
+kNN_df$optimal_eps[3] = 45
+kNN_df$optimal_eps[4] = 50
+kNN_df$optimal_eps[5] = 53
+kNN_df$optimal_eps[6] = 45
+kNN_df$optimal_eps[7] = 49
+kNN_df$optimal_eps[8] = 48
+kNN_df$optimal_eps[9] = 49
+kNN_df$optimal_eps[10] = 45
+kNN_df$optimal_eps[11] = 42
+kNN_df$optimal_eps[12] = 30
+kNN_df$optimal_eps[13] = 41
+kNN_df$optimal_eps[14] = 45
+kNN_df$optimal_eps[15] = 40
+kNN_df$optimal_eps[16] = 50
+kNN_df$optimal_eps[17] = 49
+kNN_df$optimal_eps[18] = 45
+kNN_df$optimal_eps[19] = 48
+kNN_df$optimal_eps[20] = 39
+kNN_df$optimal_eps[21] = 49
+kNN_df$optimal_eps[22] = 40
+kNN_df$optimal_eps[23] = 40
+kNN_df$optimal_eps[24] = 35
+kNN_df$optimal_eps[25] = 35
+kNN_df$optimal_eps[26] = 43
+kNN_df$optimal_eps[27] = 42
+kNN_df$optimal_eps[28] = 45
+kNN_df$optimal_eps[29] = 40
+kNN_df$optimal_eps[30] = 38
+kNN_df$optimal_eps[31] = 41
+kNN_df$optimal_eps[32] = 38
+kNN_df$optimal_eps[33] = 42
+kNN_df$optimal_eps[34] = 48
+kNN_df$optimal_eps[35] = 40
+kNN_df$optimal_eps[36] = 40
+kNN_df$optimal_eps[37] = 45
+kNN_df$optimal_eps[38] = 40
+kNN_df$optimal_eps[39] = 48
+kNN_df$optimal_eps[40] = 49
+
+kNN_df$optimal_eps <- as.numeric(kNN_df$optimal_eps)
+
+Fix_df <- merge(Fix_df,kNN_df)
+
+#Run cluster analysis using dbscan and save outcome
+num = 1
+for(i in unique(averaged_full_data$image)){
+  data <- subset(averaged_full_data, image == i)
+  data <- subset(data, select = c(PositionX, PositionY))
+  matrix_data <- as.matrix(data)
+  file = i
+  db <- dbscan::dbscan(matrix_data, eps = kNN_df$optimal_eps[num], minPts = 3, borderPoints = FALSE)
+  assign(paste("db_",file,sep = ""),db)
+  num = num + 1
+}
+
+db_abstract_12
+
+temp <- as.data.frame(db_abstract_12$cluster) # 0 = noise, 1 = cluster - change db results accordingly
+temp <- plyr::rename(temp, c('db_abstract_12$cluster'= 'cluster')) #change db results accrodingly
+temp$cluster <- as.factor(temp$cluster)
+temp$cluster <- plyr::revalue(temp$cluster, c('0' = 'Noise','1'= 'Cluster_1', '2'='Cluster_2'))
+
+plot_data <- subset(averaged_full_data, averaged_full_data$image == 'abstract_12', select = c(PositionX,PositionY)) #change data subset accordingly
+
+plot_data <- cbind(plot_data,temp)
+
+img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_abs12_newbg.png') #change png accordingly
+g <- grid::rasterGrob(img, interpolate = T)
+
+ggplot(plot_data, aes(x = PositionX, y = PositionY, color = cluster)) +
+  xlim(0,1600) +
+  ylim(0,900)+ 
+  annotation_custom(g, xmin = 0, xmax = 1600, ymin = 0, ymax = 900) +
+  geom_point(size = 3, shape = 'circle') +
+  geom_mark_ellipse(data = subset(plot_data, plot_data$cluster == 'Core'),expand=0,aes(fill=cluster), show.legend = F)+
+  #scale_color_brewer(palette = 'Greens', direction = 1)+
+  geom_hline(yintercept = grid_args$grid_offsets[2]*900, color = "grey")+
+  geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*1)*900, color = "grey")+
+  geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*2)*900, color = "grey")+
+  geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*3)*900, color = "grey")+
+  geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*3)*900, color = "grey")+
+  geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*4)*900, color = "grey")+
+  geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*5)*900, color = "grey")+
+  geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*6)*900, color = "grey")+
+  
+  geom_vline(xintercept = grid_args$grid_offsets[1]*1600, color = "grey")+
+  geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*1)*1600, color = "grey")+
+  geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*2)*1600, color = "grey")+
+  geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*3)*1600, color = "grey")+
+  geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*4)*1600, color = "grey")+
+  geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*5)*1600, color = "grey")+
+  geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*6)*1600, color = "grey")+
+  scale_color_manual(values = wes_palette(n = 3, name ="Darjeeling1")) +
+  ggtitle("'Untitled' by Jackson Pollock")#change name and color scheme accordingly
+
+
+#Other visualizations
+#pairs(matrix_data, col = db$cluster + 1L) #clusters seperated by axis
+#plot(matrix_data, col = db$cluster + 1L) #clusters = red, noise points = black
+#points(matrix_data[db$cluster==0,], pch = 3, col = "grey")
+```

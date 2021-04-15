@@ -9,10 +9,10 @@ editor_options:
 
 ```{r}
 #Load packages - ONLY NECESSARY IF PREVIOUS PARTS HAVE NOT BEEN RUN
-#library(pacman)
-#p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,
-#       gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,lattice,
-#       factoextra,ggforce,convaveman,msm,plyr,dplyr,gplots)
+library(pacman)
+p_load(devtools,ggplot2,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,
+       dbscan,stringr,gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,
+       lattice,ggforce,msm,plyr,dplyr,gplots,groupdata2,hydroGOF)
 
 #Load data
 Fix_df <- read.csv('Fix_data_BSC.csv') #Dataset containing all fixations
@@ -73,8 +73,8 @@ sum(img_fam$Number_yes[img_fam$genre == 'abstract'])
 
 #Art interest
 art_interest <- BehaveDat %>% #summarizing results from art interest questionaire
-  group_by(ID) %>%
-  summarize(
+  dplyr::group_by(ID) %>%
+  dplyr::summarize(
     q8 = q8[1],
     q9 = q9[1],
     q10 = q10[1],
@@ -126,20 +126,21 @@ Testing art-interest
 ```{r}
 #Mean and SD
 art_interest %>%
-  group_by(condition) %>%
-  summarize(
+  dplyr::group_by(condition) %>%
+  dplyr::summarize(
     mean_q8 = round(mean(q8),2),
     sd_q8 = round(sd(q8),2),
     mean_q9 = round(mean(q9),2),
     sd_q9 = round(sd(q9),2),
     mean_q10 = round(mean(q10),2),
     sd_q10 = round(sd(q10),2)
-  )
+  ) #Means are nearly identical - though condition 1 is consistently higher - biggest difference is in question 10
 
 #testing assumptions - what to test?
 
-model <- glm(condition ~ q8, family = 'binomial', art_interest) #one model per question or one model with all questions?
-summary(model)
+m.int <- glm(condition ~ q8 + q9 + q10, family = 'binomial', art_interest) #one model per question or one model with all questions?
+summary(m.int)
+#No significant difference in art interest between the two conditions
 
 
 ```
@@ -208,9 +209,181 @@ SP = ggplot(subset(test_fix, image == "abstract_12" & ID == 2), aes(x = Position
 
 ```
 
+Testing rating scores (Behavioral responses)
 
+```{r}
+#Check distribution?
+
+small_BehaveDat <- BehaveDat %>% #(rounded) means for each participant
+  dplyr::group_by(ID) %>%
+  dplyr::summarize(
+    q1 = q1[1],
+    q2 = q2[1],
+    q3 = q3[1],
+    q4 = q4[1],
+    q5 = q5[1],
+    q6 = q6[1],
+    q7 = q7[1],
+    q8 = q8[1],
+    q9 = q9[1],
+    q10 = q10[1],
+    q11 = q11[1],
+    condition = condition[1]
+  )
+
+small_BehaveDat$condition <- as.factor(small_BehaveDat$condition)
+
+#Calculating means for understanding and liking
+BehaveDat$LikingMean = round((BehaveDat$q1 + BehaveDat$q2 + BehaveDat$q3)/3, digits = 2)
+BehaveDat$UnderstandingMean = round((BehaveDat$q4 + BehaveDat$q5 + BehaveDat$q6)/3, digits = 2)
+
+#Boxplots
+ggplot(small_BehaveDat,aes(y=q1,x=condition))+geom_boxplot()+ggtitle("Go to a museum to see this picture?")+
+  xlab("Condition") + ylab("Rating")+ coord_cartesian(ylim = c(1, 7))
+
+
+mean_BehaveDat <- BehaveDat %>% #summarizing mean of ratings for each participants 
+  dplyr::group_by(ID) %>%
+  dplyr::summarize(
+    condition = condition[1],
+    q1 = q1[1],
+    q2 = q2[1],
+    q3 = q3[1],
+    q4 = q4[1],
+    q5 = q5[1],
+    q6 = q6[1],
+    LikingMean = LikingMean[1],
+    UnderstandingMean = UnderstandingMean[1]
+  )
+
+BehaveDat$condition <- as.factor(BehaveDat$condition)
+
+rescalelist = c("LikingMean","UnderstandingMean") #making a list with variales we want to scale
+BehaveDat.s = BehaveDat[, colnames(BehaveDat) %in% rescalelist] %>% 
+  apply(.,function(x) scale(x,center= mean(x,na.rm = T), 
+                            scale = sd(x, na.rm = T))) %>% 
+  cbind(.,BehaveDat[,! colnames(BehaveDat) %in% rescalelist]) 
+
+
+m1.1 = lmerTest::lmer(LikingMean ~ 1 +condition + (1|ID) +
+                        (1+condition|image),BehaveDat)
+
+m1.2 = lmerTest::lmer(UnderstandingMean ~ 1 + condition +
+                        (1|ID)+(1+condition|image),BehaveDat) 
+#A significant effect of condition
+
+m1.3 = lmerTest::lmer(LikingMean ~ 1 + condition*artist +
+                        (1+artist|ID)+(1+condition|image),BehaveDat)
+
+m1.4 = lmerTest::lmer(UnderstandingMean ~ 1 + condition*artist+
+                        (1+artist|ID)+(1+condition|image), BehaveDat) 
+#A significant effect of rothko and pollock. Also a significant interaction effect between pollock and condition
+
+m1.5 <- lmerTest::lmer(LikingMean ~ 1 + condition*genre+
+                        (1+genre|ID)+(1+condition|image), BehaveDat) 
+
+summary(m1.5)
+
+m1.6 <- lmerTest::lmer(UnderstandingMean ~ 1 + condition*genre+
+                        (1+genre|ID)+(1+condition|image), BehaveDat) 
+
+summary(m1.6)
+
+#Defing a function to get performance
+getPerformance = function(test_df, train_df, mdl, mdl_string, n = NA){
+  #asses performance and returns a result df
+  
+    #save perf to list
+      #Test performance
+  
+  #extract predicted value from the mdl string to use in the rmse
+  temp_string = gsub("(\\~).+", mdl_string, replacement = "")
+  actual_col = gsub(" ", x = temp_string, replacement = "")
+  actual =pull(dplyr::select(test_df, actual_col))
+  #calculating rmse
+  rmse = hydroGOF::rmse(predict(mdl, test_df, allow.new.levels = T), actual , na.rm = T)
+  mdlPerf = summary(mdl)
+    #saving performance metrix to a df
+  result_df =  data.frame(rmse = rmse,
+                          AIC = mdlPerf$AICtab[1],
+                          n = n) 
+  return(result_df)
+} 
+
+#defining a cross validate function
+CrossVal = function(num_folds, dataset, mdl_string, ID_col = NULL, CAT_col = NULL) {
+  
+  #folding the dataset
+  dataset = fold(dataset, num_folds, cat_col = CAT_col, id_col = ID_col, method = 'n_dist')
+  
+  #looping through the folds
+  for (fold in seq(num_folds)) {
+    train_df = subset(dataset, .folds != fold)
+    test_df = subset(dataset, .folds == fold)
+    
+
+    mdl = try(lmer(mdl_string, train_df, 
+                   control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+    temp_sum = try(summary(mdl))
+    if (length(temp_sum) > 3){ #if you could make a model
+      #asses performance and append it to a df
+      temp = getPerformance(test_df, train_df, mdl, mdl_string, n = fold)
+    } else {#if you couldn't make a model
+      temp = data.frame(rmse = NA,
+                        AIC = NA,
+                        n = n)
+    }
+    temp$mdl = mdl_string
+    temp$numfolds = num_folds
+    if (fold == 1){ #if first part - make a df
+      perf_df = temp
+    } else { #else append to df
+      perf_df = rbind(perf_df, temp)  
+    }
+    
+  }
+  return(perf_df)
+}
+
+BehaveDat$ID <- as.factor(BehaveDat$ID)
+
+CV_m1.1 <- CrossVal(num_folds = 3, dataset = BehaveDat, mdl_string = "LikingMean ~ 1 +condition + (1|ID) + (1+condition|image)", ID_col = "ID", CAT_col = 'condition')
+
+CV_m1.2 <- CrossVal(num_folds = 3, dataset = BehaveDat, mdl_string = "UnderstandingMean ~ 1 +condition + (1|ID) + (1+condition|image)", ID_col = "ID", CAT_col = 'condition')
+
+CV_m1.3 <- CV_m1.1 <- CrossVal(num_folds = 3, dataset = BehaveDat, mdl_string = "LikingMean ~ 1 +condition*artist + (1|ID) + (1+condition|image)", ID_col = "ID", CAT_col = 'condition')
+
+CV_m1.4 <- CrossVal(num_folds = 3, dataset = BehaveDat, mdl_string = "UnderstandingMean ~ 1 +condition*artist + (1|ID) + (1+condition|image)", ID_col = "ID", CAT_col = 'condition')
+
+CV_m1.5 <- CrossVal(num_folds = 3, dataset = BehaveDat, mdl_string = "LikingMean ~ 1 +condition*genre + (1|ID) + (1+condition|image)", ID_col = "ID", CAT_col = 'condition')
+
+CV_m1.6 <- CrossVal(num_folds = 3, dataset = BehaveDat, mdl_string = "UnderstandingMean ~ 1 +condition*genre + (1|ID) + (1+condition|image)", ID_col = "ID", CAT_col = 'condition')
+
+perf_df_behave = rbind(CV_m1.1,CV_m1.2,CV_m1.3,CV_m1.4,CV_m1.5,CV_m1.6)
+perf_df_sum_behave = group_by(perf_df_behave, mdl) %>%
+  summarise_all(funs(mean(., na.rm = TRUE)))
+
+perf_df_sum_behave <- perf_df_sum_behave[order(perf_df_sum_behave$rmse),]
+
+```
+
+Discrimination task
 
 ```{r}
 
+#accuracy is a binary variable - 0 or 1
+
+#how to best visualize?
+
+hi$accuracy <- as.factor(hi$accuracy)
+
+m3.1 <- glmer(accuracy ~ 1 + condition + 
+                (1|ID) + (1|image), data = hi, family = 'binomial')
+
+m3.2 <- glmer(accuracy ~ 1 + condition*artist + 
+                + (1|image), data = hi, family = 'binomial')
+
+m3.3 <- glmer(accuracy ~ 1 + condition*genre + 
+                (1|ID) + (1|image), data = hi, family = 'binomial')
 
 ```

@@ -8,11 +8,11 @@ output: html_document
 Preparing fixation coordinates for rocScore calculation in matlab
 
 ```{r}
-#Load packages: ONLY IF NOT RUN IN A PREVIOUS PART
-#library(pacman)
-#p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,
-#       gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,lattice,
-#       factoextra,ggforce,convaveman,msm,plyr,dplyr,gplots)
+#Load packages - ONLY NECESSARY IF PREVIOUS PARTS HAVE NOT BEEN RUN
+library(pacman)
+p_load(devtools,ggplot2,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,
+       dbscan,stringr,gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,
+       lattice,ggforce,msm,plyr,dplyr,gplots,groupdata2,hydroGOF)
 ```
 
 ```{r}

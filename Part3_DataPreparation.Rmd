@@ -7,11 +7,11 @@ output: html_document
 Creating the different fixation datasets used for analysis. Include the full set, and two smaller subsets containing 1) the first 10 fixations on each image for each participant, and 2) fixations within the first five seconds on each image for each participant
 
 ```{r}
-#Load packages - ONLY IF NOT RUN IN PART 2  
-#library(pacman)
-#p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,
-#       gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,lattice,
-#       factoextra,ggforce,convaveman,msm,plyr,dplyr,gplots)
+#Load packages - ONLY NECESSARY IF PREVIOUS PARTS HAVE NOT BEEN RUN
+library(pacman)
+p_load(devtools,ggplot2,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,
+       dbscan,stringr,gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,
+       lattice,ggforce,msm,plyr,dplyr,gplots,groupdata2,hydroGOF)
 ```
 
 ```{r}
@@ -56,6 +56,18 @@ for (i in figurative_imgs){
   Fix_df$MediaWidth[Fix_df$image == i] <- figurative_widths[n]
   n = n + 1
 }
+
+#Testing if first fixation falls at the same position as the fixation cross
+Fix_df$FixCross <- ifelse(Fix_df$PositionX > 750  & Fix_df$PositionX < 850 & Fix_df$PositionY > 400 & Fix_df$PositionY < 500, TRUE, FALSE)
+
+Fix_Cross_df <- Fix_df %>%
+  dplyr::group_by(image,ID) %>%
+  dplyr::summarize(
+    FixCross = FixCross[1]
+  )
+
+sum(Fix_Cross_df$FixCross == TRUE)/length(Fix_Cross_df$FixCross)*100 
+#Around five percent - no need to remove the first fixation
 
 #Merge with sparseness results (Part 2)
 sparsenessResults <- read.csv('SparsenessResults.csv')

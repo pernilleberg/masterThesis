@@ -9,10 +9,10 @@ editor_options:
 
 ```{r}
 #Load packages - ONLY IF NOT RUN IN A PREVIOUS PART
-#library(pacman)
-#p_load(devtools,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,dbscan,
-#       gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,lattice,
-#       factoextra,ggforce,msm,plyr,dplyr,gplots)
+library(pacman)
+p_load(devtools,ggplot2,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,
+       dbscan,stringr,gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,
+       lattice,ggforce,msm,plyr,dplyr,gplots,groupdata2,hydroGOF)
 ```
 
 ```{r}
@@ -31,6 +31,32 @@ auc_5s <- auc_5s[order(auc_5s[,1], auc_5s[,2],auc_5s[,3]),]
 
 ```
 
+```{r}
+#Adding artist:
+pollock_list <- c('abstract_11','abstract_12','abstract_13','abstract_14','abstract_15','abstract_16','abstract_17','abstract_18','abstract_19','abstract_20')
+
+rothko_list <- c('abstract_1','abstract_2','abstract_3','abstract_4','abstract_5','abstract_6','abstract_7','abstract_8','abstract_9','abstract_10')
+
+chagall_list <- c('fig_1','fig_2','fig_3','4','fig_5','fig_6','fig_7','fig_8','fig_9','fig_10')
+
+schiele_list <- c('fig_11','fig_12','fig_13','fig_14','fig_15','fig_16','fig_17','fig_18','fig_19','fig_20')
+
+auc_df$artist <- ifelse(auc_df$image %in% pollock_list, 'pollock',NA)
+
+auc_df <- mutate(auc_df,
+       artist = case_when(auc_df$image %in% pollock_list ~ "pollock",
+                          auc_df$image %in% rothko_list ~ 'rothko',
+                          auc_df$image %in% schiele_list ~ 'schiele',
+                          auc_df$image %in% chagall_list ~ 'chagall'
+       ))
+
+auc_5s <- mutate(auc_5s,
+       artist = case_when(auc_5s$image %in% pollock_list ~ "pollock",
+                          auc_5s$image %in% rothko_list ~ 'rothko',
+                          auc_5s$image %in% schiele_list ~ 'schiele',
+                          auc_5s$image %in% chagall_list ~ 'chagall'
+       ))
+```
 
 ```{r}
 #These AUC scores was calculated from the 10 first fixations for each participant for each image
@@ -79,8 +105,8 @@ auc_df$Fixation_Index <- as.numeric(auc_df$Fixation_Index)
 
 #Full data set
 plot_data <- subset(auc_df, auc_df$map_type == 'combined') %>%
-  group_by(Fixation_Index,condition, genre,map_type, peak_group) %>%
-  summarize(
+  dplyr::group_by(Fixation_Index,condition, genre,map_type, peak_group) %>%
+  dplyr::summarize(
     mean = mean(AUC),
     sd = sd(AUC),
     se = sd(AUC) / sqrt(length(AUC))
@@ -116,8 +142,8 @@ ggplot(subset(plot_data, plot_data$peak_group == 'many'), aes(x=Fixation_Index, 
 
 #Full data set - first five seconds
 plot_data <- auc_5s %>%
-  group_by(condition, map_type,peak_group) %>%
-  summarize(
+  dplyr::group_by(condition, map_type,peak_group) %>%
+  dplyr::summarize(
     mean = mean(AUC),
     sd = sd(AUC),
     se = sd(AUC) / sqrt(length(AUC)),
@@ -150,8 +176,8 @@ ggplot(subset(plot_data, plot_data$map_type == "combined"), aes(x = condition, y
 
 
 plot_data <- subset(auc_5s, auc_5s$map_type == 'combined') %>%
-  group_by(Fixation_Index,condition, genre,map_type, peak_group) %>%
-  summarize(
+  dplyr::group_by(Fixation_Index,condition, genre,map_type, peak_group) %>%
+  dplyr::summarize(
     mean = mean(AUC),
     sd = sd(AUC),
     se = sd(AUC) / sqrt(length(AUC))
@@ -170,10 +196,9 @@ ggplot(subset(plot_data, plot_data$peak_group == 'few'), aes(x=Fixation_Index, y
     geom_line(aes(group = condition), position = pd) +
     xlab('fixation index') +
     ylab('mean salience effects (AUCs)') +
-    ggtitle('Variation of salience effects over fixations') +
+    ggtitle('Variation of salience effects over fixations (Few-peaked group)') +
     ylim(0.7,1)+
-    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10","11",
-                              "12","13","14"))+
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10"))+
     scale_color_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
     facet_wrap(~genre)
 
@@ -183,10 +208,9 @@ ggplot(subset(plot_data, plot_data$peak_group == 'many'), aes(x=Fixation_Index, 
     geom_line(aes(group = condition), position = pd) +
     xlab('fixation index') +
     ylab('mean salience effects (AUCs)') +
-    ggtitle('Variation of salience effects over fixations') +
+    ggtitle('Variation of salience effects over fixations (Many-peaked group') +
     ylim(0.65,1)+
-    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10",
-                              "11","12","13","14"))+
+    scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10"))+
     scale_color_manual(values = wes_palette(n = 2, name = "GrandBudapest1")) +
     facet_wrap(~genre)
 
@@ -209,23 +233,99 @@ Models
 #AUC_data_full$genre <- as.factor(AUC_data_full$genre)
 #AUC_data_full$Fixation_Index <- factor(AUC_data_full$Fixation_Index, ordered = T)
 
-#m1 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group + 
-#             (1 + condition*Fixation_Index*peak_group|ID) + 
-#             (1 + condition*Fixation_Index*peak_group|image), 
-#           data = auc_df, 
-#           control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+m1 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group + 
+             (1|ID) + 
+             (1+condition|image),data = auc_5s,
+           control=lmerControl(optimizer = "nloptwrap",calc.derivs = F))
 ###Troubles with this model - doesn't run
-
 #summary(m1)
 
-m2 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group*map_type + (1|ID) + (1|image),data = auc_df)
-summary(m2)
-#Comment: using condition, fixation index, peak group and map type as predictors. Including ID and image as random effects. Allowing each participant and each image to have indiviudal slopes. A significant effect of peak group and fixation index and intensity.
+#m2 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group*map_type + (1|ID) + (1|image), data = auc_df)
+#summary(m2)
 
-
-m3 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group + (1|ID) + (1|image), data = auc_5s)
+m3 <- lmer(AUC ~ 1 + condition*Fixation_Index*peak_group*map_type + (1|ID) + (1+condition|image), data = auc_5s)
 summary(m3)
 
-m4 <- lmer(AUC ~  1 + condition*Fixation_Index*peak_group*map_type*genre + (1|ID) + (1|image),data = auc_df)
-#Comment: using data from the five first seconds - more effects - it is actually only condition that shows no effect. 
+#m4 <- lmer(AUC ~  1 + condition*Fixation_Index*peak_group*map_type*artist + (1|ID) + (1|image), data = auc_df)
+
+m5 <- lmer(AUC ~  1 + condition*Fixation_Index*peak_group*map_type*artist + (1|ID) + (1|image), data = auc_5s)
+summary(m5)
+
+#m6 <- lmer(AUC ~  1 + condition*Fixation_Index*peak_group*map_type*genre + (1|ID) + (1|image), data = auc_df)
+
+m7 <- lmer(AUC ~  1 + condition*Fixation_Index*peak_group*map_type*genre + (1|ID) + (1|image), data = auc_5s)
+summary(m7)
+```
+
+```{r}
+#Defing a function to get performance
+getPerformance = function(test_df, train_df, mdl, mdl_string, n = NA){
+  #asses performance and returns a result df
+  
+    #save perf to list
+      #Test performance
+  
+  #extract predicted value from the mdl string to use in the rmse
+  temp_string = gsub("(\\~).+", mdl_string, replacement = "")
+  actual_col = gsub(" ", x = temp_string, replacement = "")
+  actual =pull(dplyr::select(test_df, actual_col))
+  #calculating rmse
+  rmse = hydroGOF::rmse(predict(mdl, test_df, allow.new.levels = T), actual , na.rm = T)
+  mdlPerf = summary(mdl)
+    #saving performance metrix to a df
+  result_df =  data.frame(rmse = rmse,
+                          AIC = mdlPerf$AICtab[1],
+                          n = n) 
+  return(result_df)
+} 
+
+#defining a cross validate function
+CrossVal = function(num_folds, dataset, mdl_string, ID_col = NULL, CAT_col = NULL) {
+  
+  #folding the dataset
+  dataset = fold(dataset, num_folds, cat_col = CAT_col, id_col = ID_col, method = 'n_dist')
+  
+  #looping through the folds
+  for (fold in seq(num_folds)) {
+    train_df = subset(dataset, .folds != fold)
+    test_df = subset(dataset, .folds == fold)
+    
+
+    mdl = try(lmer(mdl_string, train_df, 
+                   control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE)))
+    temp_sum = try(summary(mdl))
+    if (length(temp_sum) > 3){ #if you could make a model
+      #asses performance and append it to a df
+      temp = getPerformance(test_df, train_df, mdl, mdl_string, n = fold)
+    } else {#if you couldn't make a model
+      temp = data.frame(rmse = NA,
+                        AIC = NA,
+                        n = n)
+    }
+    temp$mdl = mdl_string
+    temp$numfolds = num_folds
+    if (fold == 1){ #if first part - make a df
+      perf_df = temp
+    } else { #else append to df
+      perf_df = rbind(perf_df, temp)  
+    }
+    
+  }
+  return(perf_df)
+}
+
+auc_5s$ID <- as.factor(auc_5s$ID)
+
+CV_m3 =  CrossVal(num_folds = 3, dataset = auc_5s, mdl_string = "AUC ~ 1 + condition*Fixation_Index*peak_group*map_type + (1|ID) + (1|image)", ID_col = "ID", CAT_col = 'condition')
+
+CV_m5 =  CrossVal(num_folds = 3, dataset = auc_5s, mdl_string = "AUC ~ 1 + condition*Fixation_Index*peak_group*map_type*artist + (1|ID) + (1|image)", ID_col = "ID", CAT_col = 'condition')
+
+CV_m7 =  CrossVal(num_folds = 3, dataset = auc_5s, mdl_string = "AUC ~ 1 + condition*Fixation_Index*peak_group*map_type*genre + (1|ID) + (1|image)", ID_col = "ID", CAT_col = 'condition')
+
+perf_df = rbind(CV_m3,CV_m5, CV_m7)
+perf_df_sum = group_by(perf_df, mdl) %>%
+  summarise_all(funs(mean(., na.rm = TRUE)))
+
+perf_df_sum <- perf_df_sum[order(perf_df_sum$rmse),]
+
 ```

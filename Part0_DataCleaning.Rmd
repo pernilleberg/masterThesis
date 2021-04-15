@@ -1,0 +1,83 @@
+---
+title: 'Part 0: Data cleaning'
+author: "Pernille Berg Lassen"
+date: "13/4/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#Load packages - ONLY NECESSARY IF PREVIOUS PARTS HAVE NOT BEEN RUN
+library(pacman)
+p_load(devtools,ggplot2,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,
+       dbscan,stringr,gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,
+       lattice,ggforce,msm,plyr,dplyr,gplots,groupdata2,hydroGOF)
+
+```
+
+```{r}
+df <- read.csv('logfile_2_1.csv', na.strings=c("","NA"))
+df <- subset(df, select = -c(X))
+
+df$image = str_replace_all(df$image,"HighComp","")
+df$image = str_replace_all(df$image,"HighEntro","")
+df$image = str_replace_all(df$image,"\\\\",'')
+df$image = str_replace_all(df$image,".PNG",'')
+df$image = str_replace_all(df$image,".jpg",'')
+df$image = str_replace_all(df$image,".png",'')
+
+
+df$artist = str_extract(df$image,'\\w+_')
+df$artist = str_replace_all(df$artist, "_","")
+
+df$image = gsub('\\w+_', '',df$image)
+
+hi <- subset(df, df$image_right != 'NA')
+hi$image_right = str_replace_all(hi$image_right,"HighComp/Task\\\\","")
+hi$image_left = str_replace_all(hi$image_left,"HighComp/Task\\\\","")
+hi$image_right = str_replace_all(hi$image_right,"HighEntro/Task\\\\","")
+hi$image_left = str_replace_all(hi$image_left,"HighEntro/Task\\\\","")
+hi$image_right = str_replace_all(hi$image_right,".png","")
+hi$image_left = str_replace_all(hi$image_left,".png","")
+hi$image_right = str_replace_all(hi$image_right,".jpg","")
+hi$image_left = str_replace_all(hi$image_left,".jpg","")
+
+hi$image <- str_extract(hi$image_left,'\\w+_')
+hi$image_left <- str_extract(hi$image_left, "_[a-z]+")
+hi$image_right <- str_extract(hi$image_right, "_[a-z]+")
+hi$image_left <- str_replace_all(hi$image_left, "_","")
+hi$image_right <- str_replace_all(hi$image_right, "_","")
+hi$artist = str_extract(hi$image,'\\D+')
+hi$artist = str_remove(hi$artist, "_")
+
+
+hi$image <- plyr::revalue(hi$image,
+                          c("PM_1_"= "Composition III with Blue, Yellow and White",
+                            "PM_2_"="Composition with Red, Blue, and Yellow ",    
+                            "PM_3_"="New York City I ",
+                            "ML_1_"="Seal",
+                            "ML_2_"="Ambi I",
+                            "ML_3_"="Dalet Zayin ",
+                            "VG_1_"="Vase with irises",
+                            "VG_2_"="Farmhouse in Provence ",
+                            "VG_3_"="Women picking olives ",
+                            "CM_1_"="Poppy Field, Argenteuil ",
+                            "CM_2_"="Poplars (four trees) ",
+                            "CM_3_"="The Grotto of Port-Domois "))
+
+hi <- subset(hi, select = -c(q1,q2,q3, q4,q5,q6,q7,rt))
+
+hi$accuracy <- ifelse(hi$image_right == 'real' & hi$q_disc == 'right' | hi$image_left == 'real' & hi$q_disc == 'left','1','0')
+
+hi$artist <- plyr::revalue(hi$artist,c("PM" = "PietMondrian","CM" = "ClaudeMonet", "VG" = "VanGogh", "ML" = "MorrisLouis"))
+
+hi$genre <- ifelse(hi$artist == 'MorrisLouis' | hi$artist == 'PietMondrian','abstract','fig')
+
+df$rt <- df$rt + 10
+
+df_interes <- read.csv('questionaire_2_1.csv')
+df_interes <- subset(df_interes, select = -c(X))
+
+
+```

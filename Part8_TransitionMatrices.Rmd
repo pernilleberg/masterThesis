@@ -8,6 +8,14 @@ editor_options:
 ---
 
 ```{r}
+#Load packages - ONLY NECESSARY IF PREVIOUS PARTS HAVE NOT BEEN RUN
+library(pacman)
+p_load(devtools,ggplot2,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,
+       dbscan,stringr,gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,
+       lattice,ggforce,msm,plyr,dplyr,gplots,groupdata2,hydroGOF)
+```
+
+```{r}
 #Functions adapted from Davies et al. (2017)
 convertToMatrix <- function(data)
 {

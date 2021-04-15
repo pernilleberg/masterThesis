@@ -11,6 +11,15 @@ The saliency maps must be created in matlab using the GBVS algorithm (Harel, Koc
 Equation for calculating sparseness is adapted from Koide et al. (2015)
 
 ```{r}
+#Load packages - ONLY NECESSARY IF PREVIOUS PARTS HAVE NOT BEEN RUN
+library(pacman)
+p_load(devtools,ggplot2,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,
+       dbscan,stringr,gtools,wesanderson,RColorBrewer,matrixStats,topicmodels,
+       lattice,ggforce,msm,plyr,dplyr,gplots,groupdata2,hydroGOF)
+```
+
+
+```{r}
 ##Resized
 #Creating an empty dataframe
 sparseness_resized_df <- data.frame(ID = numeric(),

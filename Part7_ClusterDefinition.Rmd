@@ -3,6 +3,8 @@ title: 'Part 7: Cluster definition'
 author: "Pernille Berg Lassen"
 date: "31/3/2021"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 Cluster definition using DBSCAN
@@ -16,12 +18,14 @@ p_load(devtools,ggplot2,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,
 ```
 
 ```{r}
+#Filter fixations not on stimulus? When image dimensions is added - fixatiosn falling outside those values.
+
 averaged_full_data <- Fix_df %>%
-  group_by(image) %>%
-  mutate(Counter = sequence(rle(ID)$lengths)) %>%
-  ungroup() %>%
-  group_by(image, Counter) %>%
-  summarize(
+  dplyr::group_by(image) %>%
+  dplyr::mutate(Counter = sequence(rle(ID)$lengths)) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(image, Counter) %>%
+  dplyr::summarize(
     PositionX = median(PositionX),
     PositionY = median(PositionY)
   )
@@ -102,35 +106,55 @@ for(i in unique(averaged_full_data$image)){
   num = num + 1
 }
 
-db_abstract_12
 
-temp <- as.data.frame(db_abstract_12$cluster) # 0 = noise, 1 = cluster - change db results accordingly
-temp <- plyr::rename(temp, c('db_abstract_12$cluster'= 'cluster')) #change db results accrodingly
+
+temp <- as.data.frame(db_fig_7$cluster) # 0 = noise, 1 = cluster - change db results accordingly
+temp <- plyr::rename(temp, c('db_fig_7$cluster'= 'cluster')) #change db results accrodingly
+temp$cluster <- as.factor(temp$cluster)
+temp$cluster <- plyr::revalue(temp$cluster, c('0' = 'Noise','1'= 'Cluster_1'))
+
+plot_data <- subset(averaged_full_data, averaged_full_data$image == 'fig_7', select = c(PositionX,PositionY)) #change data subset accordingly
+
+#For one participant
+plot_data <- subset(Fix_df, Fix_df$image == 'fig_7' & Fix_df$ID == 1, select = c(PositionX,PositionY))
+
+data <- subset(plot_data, select = c(PositionX, PositionY))
+matrix_data <- as.matrix(data)
+print(kNNdistplot(matrix_data,k=4))
+db_1part <- dbscan::dbscan(matrix_data, eps = 15, minPts = 4, borderPoints = FALSE)
+
+temp <- as.data.frame(db_1part$cluster) # 0 = noise, 1 = cluster - change db results accordingly
+temp <- plyr::rename(temp, c('db_1part$cluster'= 'cluster')) #change db results accrodingly
 temp$cluster <- as.factor(temp$cluster)
 temp$cluster <- plyr::revalue(temp$cluster, c('0' = 'Noise','1'= 'Cluster_1', '2'='Cluster_2'))
 
-plot_data <- subset(averaged_full_data, averaged_full_data$image == 'abstract_12', select = c(PositionX,PositionY)) #change data subset accordingly
 
 plot_data <- cbind(plot_data,temp)
 
-img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_abs12_newbg.png') #change png accordingly
+img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_fig7.png') #change png accordingly
 g <- grid::rasterGrob(img, interpolate = T)
+#scale_color_manual(values = wes_palette(n = 3, name ="Darjeeling1"))
+#direction = 1)
+
+cols <- c("aquamarine1","darkblue", 'blue')
+
+grid_args <- grid_args_list[[33]] #change accordingly
 
 ggplot(plot_data, aes(x = PositionX, y = PositionY, color = cluster)) +
   xlim(0,1600) +
   ylim(0,900)+ 
   annotation_custom(g, xmin = 0, xmax = 1600, ymin = 0, ymax = 900) +
-  geom_point(size = 3, shape = 'circle') +
+  geom_point(size = 5, shape = 13) +
   geom_mark_ellipse(data = subset(plot_data, plot_data$cluster == 'Core'),expand=0,aes(fill=cluster), show.legend = F)+
-  #scale_color_brewer(palette = 'Greens', direction = 1)+
+  scale_color_manual(values = cols)+
   geom_hline(yintercept = grid_args$grid_offsets[2]*900, color = "grey")+
   geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*1)*900, color = "grey")+
   geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*2)*900, color = "grey")+
   geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*3)*900, color = "grey")+
-  geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*3)*900, color = "grey")+
   geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*4)*900, color = "grey")+
   geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*5)*900, color = "grey")+
   geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*6)*900, color = "grey")+
+  geom_hline(yintercept = (grid_args$grid_offsets[2]+((1-grid_args$grid_offset[2]-grid_args$grid_offsets[2])/grid_args$num_cols)*7)*900, color = "grey")+
   
   geom_vline(xintercept = grid_args$grid_offsets[1]*1600, color = "grey")+
   geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*1)*1600, color = "grey")+
@@ -139,10 +163,11 @@ ggplot(plot_data, aes(x = PositionX, y = PositionY, color = cluster)) +
   geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*4)*1600, color = "grey")+
   geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*5)*1600, color = "grey")+
   geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*6)*1600, color = "grey")+
-  scale_color_manual(values = wes_palette(n = 3, name ="Darjeeling1")) +
-  ggtitle("'Untitled' by Jackson Pollock")#change name and color scheme accordingly
+  geom_vline(xintercept = (grid_args$grid_offsets[1]+((1-grid_args$grid_offset[1]-grid_args$grid_offsets[1])/grid_args$num_cols)*7)*1600, color = "grey")+
+ 
+  ggtitle("'Portrait of artist's sister' by Marc Chagall (1910)")#change name and color scheme accordingly
 
-
+#
 #Other visualizations
 #pairs(matrix_data, col = db$cluster + 1L) #clusters seperated by axis
 #plot(matrix_data, col = db$cluster + 1L) #clusters = red, noise points = black

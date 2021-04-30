@@ -378,7 +378,7 @@ generateTransitionData <- function(data, condition_num, grid_args, perm_trans = 
 
 
 ```{r}
-permutations <- 10 #how many permuations? 351 = all possible combinations - with two permutations it take a little more than 60 minutes to run for all images.
+permutations <- 100 #how many permuations? 351 = all possible combinations. For 10 perms for one image it takes approx. 10 mintues (so 1 minute per perms)
 num_conditions <- 2
 
 gridsizes <- kNN_df# eps values from DBSCAN
@@ -501,7 +501,8 @@ for (i in unique(testing_matrices_1$image)){
 shuffled_distances_df <- data.frame(matrix(ncol=0,nrow=permutations))
 
 
-for (i in unique(testing_matrices_1$image)){
+#for (i in unique(testing_matrices_1$image)){
+  i = "abstract_1"
   current_stimuli_data <- testing_matrices_1[testing_matrices_1$image == i,]
 
   # calculate dimensions / offsets
@@ -548,7 +549,7 @@ for (i in unique(testing_matrices_1$image)){
   
   shuffled_distances_df$image <- shuffled_distances
   shuffled_distances_df <- plyr::rename(shuffled_distances_df, c('image' = i))
-}
+#}
 
 choose(27,2)        
   # output density plot
@@ -572,7 +573,7 @@ for (i in distance_df$image){
   
 }
 
-generateDensityPlot(subset(distance_df, distance_df$image == "abstract_4"), shuffled_distances_df$abstract_4, subset(testing_matrices_1,testing_matrices_1$image == "abstract_4"))
+generateDensityPlot(subset(distance_df, distance_df$image == "abstract_1"), shuffled_distances_df$abstract_1, subset(testing_matrices_1,testing_matrices_1$image == "abstract_1"))
 ```
 
 
@@ -671,10 +672,40 @@ lev_dist$genre = str_extract(lev_dist$image, "abstract|fig")
 lev_dist$mean <- round(lev_dist$mean, 3)
 lev_dist$SD <- round(lev_dist$SD,3)
 
-m1 <- lmer(mean ~ 1+condition*genre + (1|image), data = lev_dist)
+lev_dist_1 <- subset(lev_dist, lev_dist$genre == "abstract")
+lev_dist_2 <- subset(lev_dist, lev_dist$genre == "fig")
+
+lev_dist$artist <- ifelse(lev_dist$image == 'abstract_1' | 
+                            lev_dist$image == 'abstract_2'|
+                            lev_dist$image == 'abstract_3'|
+                            lev_dist$image == 'abstract_4'|
+                            lev_dist$image == 'abstract_5'|
+                            lev_dist$image == 'abstract_6'|
+                            lev_dist$image == 'abstract_7'|
+                            lev_dist$image == 'abstract_8'|
+                            lev_dist$image == 'abstract_9'|
+                            lev_dist$image == 'abstract_10','rothko','pollock')
+
+lev_dist_2$artist <- ifelse(lev_dist_2$image == 'fig_1'| 
+                              lev_dist_2$image == 'fig_2'|
+                              lev_dist_2$image == 'fig_3'|
+                              lev_dist_2$image == 'fig_4'|
+                              lev_dist_2$image == 'fig_5'|
+                              lev_dist_2$image == 'fig_6'|
+                              lev_dist_2$image == 'fig_7'|
+                              lev_dist_2$image == 'fig_8'|
+                              lev_dist_2$image == 'fig_9'|
+                              lev_dist_2$image == 'fig_10','chagall','schiele')
+
+lev_dist <- rbind(lev_dist_1,lev_dist_2)
+
+m1 <- lmer(mean ~ 1+condition + (1|image), data = lev_dist)
+summary(m1)
 #Comment: if model is specified correct, it seems that there is an effect of condition, with condition 1 being more similar than condition 0 (goes against hypothesis) - but direction for genre (figurative being less similar) make sense though it is not significant
 
+m2 <- lmer(mean ~ 1+condition*genre + (1|image), data = lev_dist)
+summary(m2)
 
-
-
+m3 <- lmer(mean ~ 1+condition*artist + (1|image), data = lev_dist)
+summary(m3)
 ```

@@ -17,22 +17,78 @@ p_load(devtools,ggplot2,tidyverse,lmerTest,data.table,ggpubr,caret,lme4,png,
 ```
 
 ```{r}
-df <- read.csv('logfile_2_1.csv', na.strings=c("","NA"))
-df <- subset(df, select = -c(X))
+P1 <- read.csv("DATA/P1_fix.csv", sep = ";", header = T)
 
-df$image = str_replace_all(df$image,"HighComp","")
-df$image = str_replace_all(df$image,"HighEntro","")
-df$image = str_replace_all(df$image,"\\\\",'')
-df$image = str_replace_all(df$image,".PNG",'')
-df$image = str_replace_all(df$image,".jpg",'')
-df$image = str_replace_all(df$image,".png",'')
+P1_logfile <- read.csv('DATA/logfiles/logfile_1_1.csv')
+P1_logfile$rt <- (P1_logfile$rt + 10)*1000
+P1_logfile$Trial <- seq(1:24)
+P1_logfile <- subset(P1_logfile, select = -c(X,ID))
+
+P1 <- subset(P1, select = c(ï..RECORDING_SESSION_LABEL,TRIAL_INDEX,CURRENT_FIX_DURATION,CURRENT_FIX_INDEX,CURRENT_FIX_PUPIL,CURRENT_FIX_START,CURRENT_FIX_X,CURRENT_FIX_Y))
+
+P1 <- plyr::rename(P1, c("ï..RECORDING_SESSION_LABEL"="ID", "CURRENT_FIX_X"="PositionX","CURRENT_FIX_Y"="PositionY","CURRENT_FIX_INDEX"="Fixation_Index", "CURRENT_FIX_DURATION"="Duration", "TRIAL_INDEX" = "Trial","CURRENT_FIX_START"="Start", "CURRENT_FIX_PUPIL"="Pupil"))
+
+P1 <- merge(P1, P1_logfile, by = c('Trial'))
+
+P1 <- subset(P1, P1$Start < P1$rt)
+
+P1$PositionX = str_replace_all(P1$PositionX,',','.')
+P1$PositionY = str_replace_all(P1$PositionY,',','.')
+
+P1$rt <- P1$rt/1000
+P1$rt <- round(P1$rt,0)
 
 
-df$artist = str_extract(df$image,'\\w+_')
-df$artist = str_replace_all(df$artist, "_","")
+#Fixations
+temp = list.files(path = "DATA/", pattern="*_fix.csv", full.names = T)
+myfiles = lapply(temp,read.csv,sep=";",header = T)
+df_fix = rbindlist(myfiles, fill = T,idcol = "ID")
 
-df$image = gsub('\\w+_', '',df$image)
+df_fix <- subset(df_fix, df_fix$ID != 1)
 
+df_fix <- subset(df_fix, select = c(ï..RECORDING_SESSION_LABEL,TRIAL_INDEX,CURRENT_FIX_DURATION,CURRENT_FIX_INDEX,CURRENT_FIX_PUPIL,CURRENT_FIX_START,CURRENT_FIX_X,CURRENT_FIX_Y))
+
+df_fix$CURRENT_FIX_X = str_replace_all(df_fix$CURRENT_FIX_X,',','.')
+df_fix$CURRENT_FIX_Y = str_replace_all(df_fix$CURRENT_FIX_Y,',','.')
+
+df_fix <- plyr::rename(df_fix, c("ï..RECORDING_SESSION_LABEL"="ID", "CURRENT_FIX_X"="PositionX","CURRENT_FIX_Y"="PositionY","CURRENT_FIX_INDEX"="Fixation_Index", "CURRENT_FIX_DURATION"="Duration", "TRIAL_INDEX" = "Trial","CURRENT_FIX_START"="Start","CURRENT_FIX_PUPIL"="Pupil"))
+
+df_fix$PositionX <- as.numeric(df_fix$PositionX)
+df_fix$PositionY <- as.numeric(df_fix$PositionY)
+
+df_fix <- subset(df_fix, df_fix$PositionY <= 1050)
+df_fix <- subset(df_fix, df_fix$PositionY >= 0)
+
+#Saccades
+df_sac <- read.csv('DATA/P1_sac.csv', sep = ";")
+
+#Behavioral ratings
+temp = list.files(path = "DATA/logfiles", pattern="*.csv", full.names = T)
+myfiles = lapply(temp,read.csv,header = T)
+df_ratings =rbindlist(myfiles, fill = T)
+df_ratings <- plyr::rename(df_ratings, c('X'='Trial'))
+df_ratings$Trial <- df_ratings$Trial + 1 
+
+df_fix <- merge(df_fix,df_ratings, by = c('ID','Trial'))
+df_fix$rt = df_fix$rt + 10
+df_fix$rt <- round(df_fix$rt,0)
+
+df_fix <- rbind(P1,df_fix)
+
+df_fix$image = str_replace_all(df_fix$image,"HighComp","")
+df_fix$image = str_replace_all(df_fix$image,"HighEntro","")
+df_fix$image = str_replace_all(df_fix$image,"\\\\",'')
+df_fix$image = str_replace_all(df_fix$image,".PNG",'')
+df_fix$image = str_replace_all(df_fix$image,".jpg",'')
+df_fix$image = str_replace_all(df_fix$image,".png",'')
+
+df_fix$artist = str_extract(df_fix$image,'\\w+_')
+df_fix$artist = str_replace_all(df_fix$artist, "_","")
+
+df_fix$image = gsub('\\w+_', '',df_fix$image)
+
+
+#Task dataset
 hi <- subset(df, df$image_right != 'NA')
 hi$image_right = str_replace_all(hi$image_right,"HighComp/Task\\\\","")
 hi$image_left = str_replace_all(hi$image_left,"HighComp/Task\\\\","")
@@ -79,5 +135,16 @@ df$rt <- df$rt + 10
 df_interes <- read.csv('questionaire_2_1.csv')
 df_interes <- subset(df_interes, select = -c(X))
 
+img <- png::readPNG('DataBsC/heatmaps_scanpaths_images/screenshot_abs12.png')
+g <- grid::rasterGrob(img, interpolate = T)
 
+jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
+
+#One participant, one image
+heatmap_P1 <- ggplot(subset(Fix_df, ID==1 & image=='abstract_12'),aes(x = PositionX, y = PositionY)) +
+  xlim(0,1600) +
+  ylim(0, 900) +
+  annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-0, ymax=900) +
+  stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), contour=FALSE, n=1000) +
+scale_alpha(range = c(0.1, 0.6)) + scale_fill_gradientn(colours = jet.colors(10), trans='sqrt')
 ```
